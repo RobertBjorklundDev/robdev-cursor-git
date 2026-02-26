@@ -2,7 +2,7 @@
   "name": "cursor-branch-switcher",
   "displayName": "RobDev Git",
   "description": "Show top 5 recently used local branches and switch with one click.",
-  "version": "0.0.4",
+  "version": "0.0.6",
   "publisher": "local",
   "engines": {
     "vscode": "^1.85.0"
@@ -67,7 +67,7 @@
   "scripts": {
     "build": "tsc -p .",
     "watch": "tsc -w -p .",
-    "package": "mkdir -p .built-packages && vsce package --out .built-packages/cursor-branch-switcher-${npm_package_version}.vsix"
+    "package": "node scripts/package.js"
   },
   "devDependencies": {
     "@types/node": "^25.3.2",
