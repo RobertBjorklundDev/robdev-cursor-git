@@ -4,37 +4,11 @@ const { execFileSync } = require("node:child_process");
 
 const rootDir = path.resolve(__dirname, "..");
 const packageJsonPath = path.join(rootDir, "package.json");
-const buildInfoPath = path.join(rootDir, "build-info.json");
 const outputDir = path.join(rootDir, "built-packages");
 
 function readJsonFile(filePath) {
   const content = fs.readFileSync(filePath, "utf8");
   return JSON.parse(content);
-}
-
-function readBuildInfo() {
-  if (!fs.existsSync(buildInfoPath)) {
-    return {
-      build: 0
-    };
-  }
-
-  const parsed = readJsonFile(buildInfoPath);
-  if (typeof parsed.build !== "number" || !Number.isFinite(parsed.build) || parsed.build < 0) {
-    return {
-      build: 0
-    };
-  }
-
-  return parsed;
-}
-
-function writeBuildInfo(buildNumber) {
-  const nextInfo = {
-    build: buildNumber,
-    lastPackagedAt: new Date().toISOString()
-  };
-  fs.writeFileSync(buildInfoPath, `${JSON.stringify(nextInfo, null, 2)}\n`, "utf8");
 }
 
 function getVsceCommand() {
@@ -77,15 +51,12 @@ function run() {
 
   const packageJson = readJsonFile(packageJsonPath);
   const nextVersion = bumpPatchVersion(packageJson.version);
-  const buildInfo = readBuildInfo();
-  const nextBuild = buildInfo.build + 1;
 
   packageJson.version = nextVersion;
   writePackageJson(packageJson);
-  writeBuildInfo(nextBuild);
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const outputFile = `${packageJson.name}-${packageJson.version}-build.${nextBuild}.vsix`;
+  const outputFile = `${packageJson.name}-${packageJson.version}.vsix`;
   const outputPath = path.join(outputDir, outputFile);
 
   execFileSync(getVsceCommand(), ["vsce", "package", "--out", outputPath], {

@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { LogStore } from "./LogStore";
 import type { Repository } from "./types";
 
 const MAX_STORED_BRANCHES = 20;
@@ -40,9 +41,11 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
   public readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
 
   private readonly state: vscode.Memento;
+  private readonly logStore: LogStore;
 
-  public constructor(state: vscode.Memento) {
+  public constructor(state: vscode.Memento, logStore: LogStore) {
     this.state = state;
+    this.logStore = logStore;
   }
 
   public setRepository(repository: Repository | undefined) {
@@ -102,6 +105,24 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
     return items;
   }
 
+  public async getBaseBranchName() {
+    if (!this.repository) {
+      return "main";
+    }
+
+    try {
+      const stdout = await this.runGitCommand(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+      const normalized = this.normalizeBranchName(stdout.trim());
+      if (normalized.startsWith("origin/")) {
+        return normalized.slice("origin/".length);
+      }
+      return normalized || "main";
+    } catch {
+      this.logStore.warn("branches", "Falling back to base branch 'main'.");
+      return "main";
+    }
+  }
+
   private getStorageKey(repoPath: string) {
     return `branchSwitcher.mru.${repoPath}`;
   }
@@ -145,11 +166,7 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
     }
 
     try {
-      const { stdout } = await this.execFileAsync(
-        "git",
-        ["log", "-1", "--format=%ct", branchName],
-        { cwd: this.repository.rootUri.fsPath }
-      );
+      const stdout = await this.runGitCommand(["log", "-1", "--format=%ct", branchName]);
       const timestampSeconds = Number(stdout.trim());
       if (!Number.isFinite(timestampSeconds) || timestampSeconds <= 0) {
         return "no commits";
@@ -157,6 +174,32 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
       return this.formatRelativeTime(timestampSeconds * 1000);
     } catch {
       return "no commits";
+    }
+  }
+
+  private async runGitCommand(args: string[]) {
+    if (!this.repository) {
+      throw new Error("Missing repository.");
+    }
+    const commandString = `git ${args.join(" ")}`;
+    this.logStore.info("git", `$ ${commandString}`);
+    try {
+      const { stdout, stderr } = await this.execFileAsync("git", args, {
+        cwd: this.repository.rootUri.fsPath
+      });
+      const trimmedStdout = stdout.trim();
+      const trimmedStderr = stderr.trim();
+      if (trimmedStdout) {
+        this.logStore.info("git", trimmedStdout);
+      }
+      if (trimmedStderr) {
+        this.logStore.warn("git", trimmedStderr);
+      }
+      return stdout;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown git command error";
+      this.logStore.error("git", message);
+      throw error;
     }
   }
 

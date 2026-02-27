@@ -1,21 +1,95 @@
 import * as vscode from "vscode";
+import type { LogEntry, LogStore } from "./LogStore";
 import type { RecentBranch, RecentBranchesProvider } from "./RecentBranchesProvider";
+import type { GitHubAuthStatus, PullRequestSummary, PullRequestsProvider } from "./PullRequestsProvider";
 
 interface BranchViewMessage {
-  type: "switchBranch" | "mergeFromBase" | "refresh";
+  type:
+    | "switchBranch"
+    | "mergeFromBase"
+    | "ready"
+    | "openPullRequest"
+    | "mergePullRequest"
+    | "signInGithub"
+    | "switchGithubAccount"
+    | "openGithubAccounts";
   branchName?: string;
+  pullRequestId?: number;
+  pullRequestUrl?: string;
+}
+
+interface WebviewSetBranchesMessage {
+  type: "setBranches";
+  branches: RecentBranch[];
+  baseBranchName: string;
+  isLoading: boolean;
+}
+
+interface WebviewSetLoadingMessage {
+  type: "setLoading";
+  isLoading: boolean;
+}
+
+interface WebviewSetPullRequestsMessage {
+  type: "setPullRequests";
+  pullRequests: PullRequestSummary[];
+}
+
+interface WebviewSetLogsMessage {
+  type: "setLogs";
+  logs: LogEntry[];
+}
+
+interface WebviewAppendLogMessage {
+  type: "appendLog";
+  log: LogEntry;
+}
+
+interface WebviewSetAuthStatusMessage {
+  type: "setAuthStatus";
+  authStatus: GitHubAuthStatus;
+}
+
+interface WebviewAssets {
+  mergeArrowSvg: string;
 }
 
 class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private readonly provider: RecentBranchesProvider;
+  private readonly pullRequestsProvider: PullRequestsProvider;
+  private readonly logStore: LogStore;
+  private readonly extensionUri: vscode.Uri;
   private readonly subscriptions: vscode.Disposable[] = [];
+  private lastBranches: RecentBranch[] = [];
+  private lastPullRequests: PullRequestSummary[] = [];
+  private lastAuthStatus: GitHubAuthStatus = {
+    isProviderAvailable: true,
+    isAuthenticated: false
+  };
+  private lastBaseBranchName = "main";
+  private isLoading = false;
+  private hasInitializedHtml = false;
 
-  public constructor(provider: RecentBranchesProvider) {
+  public constructor(
+    provider: RecentBranchesProvider,
+    pullRequestsProvider: PullRequestsProvider,
+    logStore: LogStore,
+    extensionUri: vscode.Uri
+  ) {
     this.provider = provider;
+    this.pullRequestsProvider = pullRequestsProvider;
+    this.logStore = logStore;
+    this.extensionUri = extensionUri;
     this.subscriptions.push(
       this.provider.onDidChangeTreeData(() => {
         void this.render();
+      }),
+      this.pullRequestsProvider.onDidChangeData(() => {
+        void this.render();
+      }),
+      this.logStore.onDidAppend((entry) => {
+        this.postAppendLog(entry);
       })
     );
   }
@@ -28,10 +102,17 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
 
   public resolveWebviewView(webviewView: vscode.WebviewView) {
     this.view = webviewView;
-    webviewView.webview.options = { enableScripts: true };
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [
+        vscode.Uri.joinPath(this.extensionUri, "media"),
+        vscode.Uri.joinPath(this.extensionUri, "resources")
+      ]
+    };
     webviewView.webview.onDidReceiveMessage((message: BranchViewMessage) => {
       void this.handleMessage(message);
     });
+    this.hasInitializedHtml = false;
     void this.render();
   }
 
@@ -40,13 +121,147 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const branches = await this.provider.getRecentBranches();
-    this.view.webview.html = this.getHtml(this.view.webview, branches);
+    this.isLoading = true;
+    if (!this.hasInitializedHtml) {
+      this.view.webview.html = this.getHtml(this.view.webview);
+      this.hasInitializedHtml = true;
+      this.postBranchesUpdate(this.lastBranches, this.lastBaseBranchName, this.isLoading);
+      this.postPullRequestsUpdate(this.lastPullRequests);
+      this.postAuthStatus(this.lastAuthStatus);
+      this.postLogs(this.logStore.getEntries());
+    } else {
+      this.postLoading(this.isLoading);
+    }
+
+    try {
+      const [branches, baseBranchName, pullRequests, authStatus] = await Promise.all([
+        this.provider.getRecentBranches(),
+        this.provider.getBaseBranchName(),
+        this.pullRequestsProvider.getPullRequests(),
+        this.pullRequestsProvider.getAuthStatus()
+      ]);
+      this.lastBranches = branches;
+      this.lastBaseBranchName = baseBranchName;
+      this.lastPullRequests = pullRequests;
+      this.lastAuthStatus = authStatus;
+      this.isLoading = false;
+      this.postBranchesUpdate(branches, baseBranchName, this.isLoading);
+      this.postPullRequestsUpdate(pullRequests);
+      this.postAuthStatus(authStatus);
+    } catch {
+      this.isLoading = false;
+      this.postBranchesUpdate(this.lastBranches, this.lastBaseBranchName, this.isLoading);
+      this.postPullRequestsUpdate(this.lastPullRequests);
+      this.postAuthStatus(this.lastAuthStatus);
+    }
+  }
+
+  private postLoading(isLoading: boolean) {
+    if (!this.view) {
+      return;
+    }
+    const message: WebviewSetLoadingMessage = {
+      type: "setLoading",
+      isLoading
+    };
+    this.view.webview.postMessage(message);
+  }
+
+  private postBranchesUpdate(branches: RecentBranch[], baseBranchName: string, isLoading: boolean) {
+    if (!this.view) {
+      return;
+    }
+    const message: WebviewSetBranchesMessage = {
+      type: "setBranches",
+      branches,
+      baseBranchName,
+      isLoading
+    };
+    this.view.webview.postMessage(message);
+  }
+
+  private postPullRequestsUpdate(pullRequests: PullRequestSummary[]) {
+    if (!this.view) {
+      return;
+    }
+    const message: WebviewSetPullRequestsMessage = {
+      type: "setPullRequests",
+      pullRequests
+    };
+    this.view.webview.postMessage(message);
+  }
+
+  private postLogs(logs: LogEntry[]) {
+    if (!this.view) {
+      return;
+    }
+    const message: WebviewSetLogsMessage = {
+      type: "setLogs",
+      logs
+    };
+    this.view.webview.postMessage(message);
+  }
+
+  private postAppendLog(log: LogEntry) {
+    if (!this.view) {
+      return;
+    }
+    const message: WebviewAppendLogMessage = {
+      type: "appendLog",
+      log
+    };
+    this.view.webview.postMessage(message);
+  }
+
+  private postAuthStatus(authStatus: GitHubAuthStatus) {
+    if (!this.view) {
+      return;
+    }
+    const message: WebviewSetAuthStatusMessage = {
+      type: "setAuthStatus",
+      authStatus
+    };
+    this.view.webview.postMessage(message);
   }
 
   private async handleMessage(message: BranchViewMessage) {
-    if (message.type === "refresh") {
-      await vscode.commands.executeCommand("branchSwitcher.refresh");
+    if (message.type === "ready") {
+      this.postBranchesUpdate(this.lastBranches, this.lastBaseBranchName, this.isLoading);
+      this.postPullRequestsUpdate(this.lastPullRequests);
+      this.postAuthStatus(this.lastAuthStatus);
+      this.postLogs(this.logStore.getEntries());
+      return;
+    }
+
+    if (message.type === "signInGithub") {
+      await vscode.commands.executeCommand("branchSwitcher.signInGithub");
+      return;
+    }
+
+    if (message.type === "switchGithubAccount") {
+      await vscode.commands.executeCommand("branchSwitcher.switchGithubAccount");
+      return;
+    }
+
+    if (message.type === "openGithubAccounts") {
+      await vscode.commands.executeCommand("branchSwitcher.openGithubAccounts");
+      return;
+    }
+
+    if (message.type === "openPullRequest") {
+      if (!message.pullRequestUrl) {
+        return;
+      }
+      const url = vscode.Uri.parse(message.pullRequestUrl);
+      await vscode.env.openExternal(url);
+      return;
+    }
+
+    if (message.type === "mergePullRequest") {
+      if (typeof message.pullRequestId !== "number") {
+        return;
+      }
+      await vscode.commands.executeCommand("branchSwitcher.mergePullRequest", message.pullRequestId);
       return;
     }
 
@@ -64,18 +279,24 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private getHtml(webview: vscode.Webview, branches: RecentBranch[]) {
+  private getHtml(webview: vscode.Webview) {
     const nonce = getNonce();
+    const stylesheetUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, "media", "webview.css")
+    );
+    const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, "media", "webview.js"));
+    const mergeArrowUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, "resources", "merge-base-arrow.svg")
+    );
+    const assets: WebviewAssets = {
+      mergeArrowSvg: mergeArrowUri.toString()
+    };
     const csp = [
       "default-src 'none'",
-      `style-src ${webview.cspSource} 'unsafe-inline'`,
-      `script-src 'nonce-${nonce}'`
+      `style-src ${webview.cspSource}`,
+      `img-src ${webview.cspSource} data:`,
+      `script-src ${webview.cspSource} 'nonce-${nonce}'`
     ].join("; ");
-
-    const rows =
-      branches.length === 0
-        ? `<div class="empty">No recent branches yet.</div>`
-        : branches.map((branch) => this.renderBranchRow(branch)).join("");
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -83,113 +304,17 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy" content="${csp}">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-      :root {
-        color-scheme: light dark;
-      }
-      body {
-        margin: 0;
-        padding: 10px;
-        font-family: var(--vscode-font-family);
-        font-size: var(--vscode-font-size);
-        color: var(--vscode-foreground);
-        background: transparent;
-      }
-      .header {
-        display: flex;
-        justify-content: flex-end;
-        margin-bottom: 10px;
-      }
-      .secondary-button {
-        border: 1px solid var(--vscode-button-border, transparent);
-        background: var(--vscode-button-secondaryBackground);
-        color: var(--vscode-button-secondaryForeground);
-        border-radius: 6px;
-        padding: 6px 10px;
-        cursor: pointer;
-      }
-      .list {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
-      .row {
-        display: flex;
-        gap: 8px;
-      }
-      .branch-button {
-        flex: 1;
-        border: 1px solid var(--vscode-button-border, transparent);
-        border-radius: 8px;
-        background: var(--vscode-button-secondaryBackground);
-        color: var(--vscode-button-secondaryForeground);
-        cursor: pointer;
-        text-align: left;
-        padding: 10px 12px;
-      }
-      .branch-button.is-current {
-        background: color-mix(in srgb, var(--vscode-button-background) 70%, transparent);
-        color: var(--vscode-button-foreground);
-      }
-      .branch-name {
-        font-weight: 600;
-        display: block;
-        margin-bottom: 2px;
-      }
-      .branch-meta {
-        font-size: 12px;
-        color: var(--vscode-descriptionForeground);
-      }
-      .merge-button {
-        white-space: nowrap;
-      }
-      .empty {
-        color: var(--vscode-descriptionForeground);
-        padding: 10px 4px;
-      }
-    </style>
+    <link rel="stylesheet" href="${stylesheetUri}">
   </head>
   <body>
-    <div class="header">
-      <button class="secondary-button" data-action="refresh">Refresh</button>
-    </div>
-    <div class="list">${rows}</div>
+    <div id="root"></div>
     <script nonce="${nonce}">
-      const vscode = acquireVsCodeApi();
-      document.querySelectorAll("button[data-action]").forEach((button) => {
-        button.addEventListener("click", () => {
-          vscode.postMessage({
-            type: button.dataset.action,
-            branchName: button.dataset.branch
-          });
-        });
-      });
+      window.__BRANCH_SWITCHER_ASSETS__ = ${JSON.stringify(assets)};
     </script>
+    <script nonce="${nonce}" src="${scriptUri}"></script>
   </body>
 </html>`;
   }
-
-  private renderBranchRow(branch: RecentBranch) {
-    const safeName = escapeHtml(branch.name);
-    const safeDescription = escapeHtml(branch.lastCommitDescription);
-    const currentClass = branch.isCurrent ? " is-current" : "";
-    return `<div class="row">
-  <button class="branch-button${currentClass}" data-action="switchBranch" data-branch="${safeName}">
-    <span class="branch-name">${safeName}</span>
-    <span class="branch-meta">${safeDescription}${branch.isCurrent ? " • current" : ""}</span>
-  </button>
-  <button class="secondary-button merge-button" data-action="mergeFromBase" data-branch="${safeName}">Merge</button>
-</div>`;
-  }
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 function getNonce() {

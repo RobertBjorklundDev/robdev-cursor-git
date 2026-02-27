@@ -1,8 +1,13 @@
 {
   "name": "cursor-branch-switcher",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "license": "MIT",
   "displayName": "RobDev Git",
   "description": "Show top 5 recently used local branches and switch with one click.",
-  "version": "0.0.8",
+  "version": "0.0.22",
   "publisher": "local",
   "engines": {
     "vscode": "^1.85.0"
@@ -14,6 +19,9 @@
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
+  "extensionDependencies": [
+    "vscode.github-authentication"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -40,21 +48,22 @@
       },
       {
         "command": "branchSwitcher.mergeFromBase",
-        "title": "Merge in Base"
+        "title": "Merge Base Into Branch"
       },
       {
-        "command": "branchSwitcher.refresh",
-        "title": "Refresh Recent Branches"
+        "command": "branchSwitcher.signInGithub",
+        "title": "Sign In to GitHub"
+      },
+      {
+        "command": "branchSwitcher.switchGithubAccount",
+        "title": "Switch GitHub Account"
+      },
+      {
+        "command": "branchSwitcher.openGithubAccounts",
+        "title": "Open GitHub Accounts"
       }
     ],
     "menus": {
-      "view/title": [
-        {
-          "command": "branchSwitcher.refresh",
-          "when": "view == recentBranchesView",
-          "group": "navigation"
-        }
-      ],
       "view/item/context": [
         {
           "command": "branchSwitcher.mergeFromBase",
@@ -65,14 +74,25 @@
     }
   },
   "scripts": {
-    "build": "tsc -p .",
+    "build": "npm run build:webview && tsc -p .",
+    "build:webview": "npm run build:webview:js && npm run build:webview:css",
+    "build:webview:js": "esbuild webview/main.tsx --bundle --platform=browser --format=iife --target=es2020 --outfile=media/webview.js",
+    "build:webview:css": "tailwindcss -i webview/styles.css -o media/webview.css --minify",
     "watch": "tsc -w -p .",
     "package": "node scripts/package.js"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "^4.2.1",
     "@types/node": "^25.3.2",
     "@types/vscode": "^1.85.0",
+    "esbuild": "^0.27.3",
+    "tailwindcss": "^4.2.1",
     "typescript": "^5.6.3",
     "vsce": "^2.15.0"
+  },
+  "dependencies": {
+    "lucide-react": "^0.575.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   }
 }
