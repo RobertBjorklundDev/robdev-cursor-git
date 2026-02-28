@@ -7,6 +7,11 @@ import { RecentBranchesWebviewProvider } from "./RecentBranchesWebviewProvider";
 import { PullRequestsProvider } from "./PullRequestsProvider";
 import type { GitAPI, GitExtensionExports, Repository } from "./types";
 
+interface ExtensionPackageJson {
+  version?: unknown;
+  robdevBuildCode?: unknown;
+}
+
 type ExecFileAsync = (
   file: string,
   args: string[],
@@ -24,15 +29,32 @@ async function activate(context: vscode.ExtensionContext) {
   const logStore = new LogStore();
   const provider = new RecentBranchesProvider(context.workspaceState, logStore);
   const pullRequestsProvider = new PullRequestsProvider(logStore);
+  const extensionPackageJson = context.extension.packageJSON as ExtensionPackageJson;
+  const extensionVersion =
+    typeof extensionPackageJson.version === "string"
+      ? extensionPackageJson.version
+      : "unknown";
+  const extensionBuildCode =
+    typeof extensionPackageJson.robdevBuildCode === "string"
+      ? extensionPackageJson.robdevBuildCode
+      : "dev";
   const webviewProvider = new RecentBranchesWebviewProvider(
     provider,
     pullRequestsProvider,
     logStore,
-    context.extensionUri
+    context.extensionUri,
+    context.workspaceState,
+    extensionVersion,
+    extensionBuildCode
   );
   const webviewDisposable = vscode.window.registerWebviewViewProvider(
     "recentBranchesView",
-    webviewProvider
+    webviewProvider,
+    {
+      webviewOptions: {
+        retainContextWhenHidden: true
+      }
+    }
   );
   context.subscriptions.push(webviewDisposable);
   context.subscriptions.push(webviewProvider);
@@ -138,6 +160,39 @@ async function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  const pullFromOriginDisposable = vscode.commands.registerCommand(
+    "branchSwitcher.pullFromOrigin",
+    async (branchArg: string | { branchName?: string }) => {
+      const repository = getCurrentRepository();
+      if (!repository) {
+        logStore.warn("commands", "Pull from origin requested with no available repository.");
+        return;
+      }
+
+      try {
+        const targetBranch = normalizeBranchName(getBranchName(branchArg));
+        if (!targetBranch) {
+          logStore.warn("commands", "Could not determine target branch for pull from origin.");
+          return;
+        }
+        const currentBranch = normalizeBranchName(repository.state.HEAD?.name ?? "");
+
+        if (currentBranch !== targetBranch) {
+          logStore.info("commands", `Checking out '${targetBranch}' before pull.`);
+          await repository.checkout(targetBranch);
+          await updateCurrentBranchMru(repository);
+        }
+
+        await runGit(repository, execFileAsync, ["pull", "origin", targetBranch], logStore);
+        await updateCurrentBranchMru(repository);
+        logStore.info("commands", `Pulled latest changes from origin/${targetBranch}.`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        logStore.error("commands", `Pull from origin failed: ${message}`);
+      }
+    }
+  );
+
   const mergeFromBaseDisposable = vscode.commands.registerCommand(
     "branchSwitcher.mergeFromBase",
     async (branchArg: string | { branchName?: string }) => {
@@ -217,6 +272,7 @@ async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(activeEditorDisposable);
   context.subscriptions.push(authSessionsDisposable);
   context.subscriptions.push(switchBranchDisposable);
+  context.subscriptions.push(pullFromOriginDisposable);
   context.subscriptions.push(mergeFromBaseDisposable);
   context.subscriptions.push(mergePullRequestDisposable);
   context.subscriptions.push(signInGithubDisposable);

@@ -7,7 +7,7 @@
   "license": "MIT",
   "displayName": "RobDev Git",
   "description": "Show top 5 recently used local branches and switch with one click.",
-  "version": "0.0.23",
+  "version": "0.0.31",
   "publisher": "local",
   "engines": {
     "vscode": "^1.85.0"
@@ -18,7 +18,7 @@
   "activationEvents": [
     "onStartupFinished"
   ],
-  "main": "./dist/extension.js",
+  "main": "./dist/extension/extension.js",
   "extensionDependencies": [
     "vscode.github-authentication"
   ],
@@ -74,16 +74,20 @@
     }
   },
   "scripts": {
-    "build": "npm run build:webview && tsc -p .",
+    "build": "npm run typecheck:webview && npm run build:webview && tsc -p .",
     "build:webview": "npm run build:webview:js && npm run build:webview:css",
-    "build:webview:js": "esbuild webview/main.tsx --bundle --platform=browser --format=iife --target=es2020 --outfile=media/webview.js",
-    "build:webview:css": "tailwindcss -i webview/styles.css -o media/webview.css --minify",
+    "build:webview:js": "esbuild webview/main.tsx --bundle --platform=browser --format=iife --target=es2020 --outfile=dist/media/webview.js",
+    "build:webview:css": "tailwindcss -i webview/styles.css -o dist/media/webview.css --minify",
+    "typecheck:webview": "tsc -p tsconfig.webview.json --noEmit",
     "watch": "tsc -w -p .",
-    "package": "node scripts/package.js"
+    "package": "node scripts/package.js",
+    "dev:local": "node scripts/local-dev.js"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.2.1",
     "@types/node": "^25.3.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@types/vscode": "^1.85.0",
     "esbuild": "^0.27.3",
     "tailwindcss": "^4.2.1",
@@ -94,5 +98,6 @@
     "lucide-react": "^0.575.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
-  }
+  },
+  "robdevBuildCode": "cc155758-6e48-4f53-a536-78f65dde8ad5"
 }

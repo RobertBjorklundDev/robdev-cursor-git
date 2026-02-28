@@ -1,7 +1,15 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, GitMerge, Pencil } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  ArrowDownToLine,
+  GitMerge,
+  LoaderCircle,
+  Pencil,
+} from "lucide-react";
+import { Button } from "./components/Button";
+import { Card } from "./components/Card";
 
 interface RecentBranch {
   name: string;
@@ -75,6 +83,7 @@ type WebviewMessage =
 interface BranchActionMessage {
   type:
     | "switchBranch"
+    | "pullFromOrigin"
     | "mergeFromBase"
     | "ready"
     | "openPullRequest"
@@ -88,11 +97,14 @@ interface BranchActionMessage {
 }
 
 interface WebviewAssets {
-  mergeArrowSvg: string;
+  extensionVersion: string;
+  extensionBuildCode: string;
 }
 
 interface VsCodeApi {
   postMessage(message: BranchActionMessage): void;
+  getState<T = unknown>(): T | undefined;
+  setState<T>(newState: T): T;
 }
 
 interface PullRequestStatusBadge {
@@ -104,6 +116,21 @@ interface PullRequestStatusBadge {
 interface WindowWithWebviewData extends Window {
   __BRANCH_SWITCHER_ASSETS__?: WebviewAssets;
   acquireVsCodeApi?: () => VsCodeApi;
+}
+
+type ActiveTab = "main" | "logs" | "settings";
+type PullRequestFilter = "ready" | "draft";
+
+interface PersistedAppState {
+  branches: RecentBranch[];
+  pullRequests: PullRequestSummary[];
+  logs: LogEntry[];
+  isLogAutoScrollEnabled: boolean;
+  activeTab: ActiveTab;
+  pullRequestFilter: PullRequestFilter;
+  baseBranchName: string;
+  isLoading: boolean;
+  authStatus: GitHubAuthStatus;
 }
 
 function isSetBranchesMessage(message: unknown): message is SetBranchesMessage {
@@ -119,23 +146,35 @@ function isSetLoadingMessage(message: unknown): message is SetLoadingMessage {
     return false;
   }
   const candidate = message as Partial<SetLoadingMessage>;
-  return candidate.type === "setLoading" && typeof candidate.isLoading === "boolean";
+  return (
+    candidate.type === "setLoading" && typeof candidate.isLoading === "boolean"
+  );
 }
 
-function isSetPullRequestsMessage(message: unknown): message is SetPullRequestsMessage {
+function isSetPullRequestsMessage(
+  message: unknown,
+): message is SetPullRequestsMessage {
   if (!message || typeof message !== "object") {
     return false;
   }
   const candidate = message as Partial<SetPullRequestsMessage>;
-  return candidate.type === "setPullRequests" && Array.isArray(candidate.pullRequests);
+  return (
+    candidate.type === "setPullRequests" &&
+    Array.isArray(candidate.pullRequests)
+  );
 }
 
-function isSetAuthStatusMessage(message: unknown): message is SetAuthStatusMessage {
+function isSetAuthStatusMessage(
+  message: unknown,
+): message is SetAuthStatusMessage {
   if (!message || typeof message !== "object") {
     return false;
   }
   const candidate = message as Partial<SetAuthStatusMessage>;
-  return candidate.type === "setAuthStatus" && typeof candidate.authStatus === "object";
+  return (
+    candidate.type === "setAuthStatus" &&
+    typeof candidate.authStatus === "object"
+  );
 }
 
 function isSetLogsMessage(message: unknown): message is SetLogsMessage {
@@ -159,25 +198,130 @@ function getVsCodeApi(windowWithData: WindowWithWebviewData): VsCodeApi {
     return windowWithData.acquireVsCodeApi();
   }
   return {
-    postMessage() {}
+    postMessage() {},
+    getState() {
+      return undefined;
+    },
+    setState<T>(newState: T) {
+      return newState;
+    },
   };
+}
+
+function restorePersistedAppState(vscode: VsCodeApi) {
+  const restoredState = vscode.getState<unknown>();
+  if (!restoredState || typeof restoredState !== "object") {
+    return {};
+  }
+
+  const candidate = restoredState as Partial<PersistedAppState>;
+  const nextState: Partial<PersistedAppState> = {};
+  if (Array.isArray(candidate.branches)) {
+    nextState.branches = candidate.branches;
+  }
+  if (Array.isArray(candidate.pullRequests)) {
+    nextState.pullRequests = candidate.pullRequests;
+  }
+  if (Array.isArray(candidate.logs)) {
+    nextState.logs = candidate.logs;
+  }
+  if (typeof candidate.isLogAutoScrollEnabled === "boolean") {
+    nextState.isLogAutoScrollEnabled = candidate.isLogAutoScrollEnabled;
+  }
+  if (
+    candidate.activeTab === "main" ||
+    candidate.activeTab === "logs" ||
+    candidate.activeTab === "settings"
+  ) {
+    nextState.activeTab = candidate.activeTab;
+  }
+  if (
+    candidate.pullRequestFilter === "ready" ||
+    candidate.pullRequestFilter === "draft"
+  ) {
+    nextState.pullRequestFilter = candidate.pullRequestFilter;
+  }
+  if (typeof candidate.baseBranchName === "string") {
+    nextState.baseBranchName = candidate.baseBranchName;
+  }
+  if (typeof candidate.isLoading === "boolean") {
+    nextState.isLoading = candidate.isLoading;
+  }
+  if (
+    candidate.authStatus &&
+    typeof candidate.authStatus === "object" &&
+    typeof candidate.authStatus.isProviderAvailable === "boolean" &&
+    typeof candidate.authStatus.isAuthenticated === "boolean"
+  ) {
+    nextState.authStatus = candidate.authStatus;
+  }
+  return nextState;
 }
 
 function App() {
   const windowWithData = window as WindowWithWebviewData;
   const vscode = useMemo(() => getVsCodeApi(windowWithData), [windowWithData]);
-  const mergeArrowSvg = windowWithData.__BRANCH_SWITCHER_ASSETS__?.mergeArrowSvg;
-  const [branches, setBranches] = useState<RecentBranch[]>([]);
-  const [pullRequests, setPullRequests] = useState<PullRequestSummary[]>([]);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [activeTab, setActiveTab] = useState<"main" | "logs" | "settings">("main");
-  const [pullRequestFilter, setPullRequestFilter] = useState<"ready" | "draft">("ready");
-  const [baseBranchName, setBaseBranchName] = useState("main");
-  const [isLoading, setIsLoading] = useState(true);
+  const restoredState = useMemo(
+    () => restorePersistedAppState(vscode),
+    [vscode],
+  );
+  const extensionVersion =
+    windowWithData.__BRANCH_SWITCHER_ASSETS__?.extensionVersion ?? "unknown";
+  const extensionBuildCode =
+    windowWithData.__BRANCH_SWITCHER_ASSETS__?.extensionBuildCode ?? "dev";
+  const [branches, setBranches] = useState<RecentBranch[]>(
+    () => restoredState.branches ?? [],
+  );
+  const [pullRequests, setPullRequests] = useState<PullRequestSummary[]>(
+    () => restoredState.pullRequests ?? [],
+  );
+  const [logs, setLogs] = useState<LogEntry[]>(() => restoredState.logs ?? []);
+  const [isLogAutoScrollEnabled, setIsLogAutoScrollEnabled] = useState(
+    () => restoredState.isLogAutoScrollEnabled ?? true,
+  );
+  const [activeTab, setActiveTab] = useState<ActiveTab>(
+    () => restoredState.activeTab ?? "main",
+  );
+  const [pullRequestFilter, setPullRequestFilter] = useState<PullRequestFilter>(
+    () => restoredState.pullRequestFilter ?? "ready",
+  );
+  const [baseBranchName, setBaseBranchName] = useState(
+    () => restoredState.baseBranchName ?? "main",
+  );
+  const [isLoading, setIsLoading] = useState(
+    () => restoredState.isLoading ?? true,
+  );
+  const logsContainerRef = useRef<HTMLDivElement | null>(null);
   const [authStatus, setAuthStatus] = useState<GitHubAuthStatus>({
-    isProviderAvailable: true,
-    isAuthenticated: false
+    isProviderAvailable: restoredState.authStatus?.isProviderAvailable ?? true,
+    isAuthenticated: restoredState.authStatus?.isAuthenticated ?? false,
   });
+
+  useEffect(() => {
+    const nextState: PersistedAppState = {
+      branches,
+      pullRequests,
+      logs,
+      isLogAutoScrollEnabled,
+      activeTab,
+      pullRequestFilter,
+      baseBranchName,
+      isLoading,
+      authStatus,
+    };
+    vscode.setState(nextState);
+  }, [
+    activeTab,
+    authStatus,
+    baseBranchName,
+    branches,
+    isLoading,
+    isLogAutoScrollEnabled,
+    logs,
+    pullRequestFilter,
+    pullRequests,
+    vscode,
+  ]);
 
   useEffect(() => {
     function handleMessage(event: MessageEvent<WebviewMessage>) {
@@ -216,12 +360,39 @@ function App() {
     };
   }, [vscode]);
 
+  useEffect(() => {
+    if (activeTab !== "logs") {
+      return;
+    }
+
+    if (!isLogAutoScrollEnabled) {
+      return;
+    }
+
+    const logsContainer = logsContainerRef.current;
+    if (!logsContainer) {
+      return;
+    }
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      logsContainer.scrollTop = logsContainer.scrollHeight;
+    });
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [activeTab, isLogAutoScrollEnabled, logs]);
+
   function onSwitchBranch(branchName: string) {
     vscode.postMessage({ type: "switchBranch", branchName });
   }
 
   function onMergeBaseIntoBranch(branchName: string) {
     vscode.postMessage({ type: "mergeFromBase", branchName });
+  }
+
+  function onPullFromOrigin(branchName: string) {
+    vscode.postMessage({ type: "pullFromOrigin", branchName });
   }
 
   function onOpenPullRequest(url: string) {
@@ -268,20 +439,25 @@ function App() {
     return statusParts.join(" • ");
   }
 
-  function getPullRequestBadge(pullRequest: PullRequestSummary): PullRequestStatusBadge {
+  function getPullRequestBadge(
+    pullRequest: PullRequestSummary,
+  ): PullRequestStatusBadge {
     if (pullRequest.isDraft) {
       return {
         label: "draft",
         color: "var(--vscode-testing-iconQueued)",
-        icon: Pencil
+        icon: Pencil,
       };
     }
 
-    if (pullRequest.mergeable === false || pullRequest.mergeableState === "dirty") {
+    if (
+      pullRequest.mergeable === false ||
+      pullRequest.mergeableState === "dirty"
+    ) {
       return {
         label: "conflicts",
         color: "var(--vscode-testing-iconFailed)",
-        icon: AlertTriangle
+        icon: AlertTriangle,
       };
     }
 
@@ -289,14 +465,14 @@ function App() {
       return {
         label: "mergeable",
         color: "var(--vscode-testing-iconPassed)",
-        icon: GitMerge
+        icon: GitMerge,
       };
     }
 
     return {
       label: "open",
       color: "var(--vscode-descriptionForeground)",
-      icon: GitMerge
+      icon: GitMerge,
     };
   }
 
@@ -319,62 +495,81 @@ function App() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col p-2.5">
-      <div className="flex flex-1 flex-col gap-2.5 overflow-auto">
+    <div className="flex h-screen flex-col overflow-hidden p-2.5">
+      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden">
         {activeTab === "main" ? (
-          <>
-            <div className="w-full rounded-lg border border-(--vscode-panel-border) bg-(--vscode-editor-background) px-3 py-2.5 font-bold">
-              Recent Branches
-            </div>
+          <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto pr-1">
+            <Card className="w-full px-3 py-2.5 font-bold" padding="none">
+              <div className="flex items-center justify-between gap-2">
+                <span>Recent Branches</span>
+                {isLoading ? (
+                  <LoaderCircle
+                    aria-label="Refreshing branches"
+                    className="h-3.5 w-3.5 animate-spin text-(--vscode-descriptionForeground)"
+                  />
+                ) : null}
+              </div>
+            </Card>
 
             <div className="flex min-h-14 flex-col gap-2">
               {branches.length === 0 ? (
                 <div className="px-1 py-2.5 text-(--vscode-descriptionForeground)">
-                  {isLoading ? "Loading recent branches..." : "No recent branches yet."}
+                  {isLoading
+                    ? "Loading recent branches..."
+                    : "No recent branches yet."}
                 </div>
               ) : (
                 branches.map((branch) => (
                   <div className="flex gap-2" key={branch.name}>
-                    <button
-                      className={`flex-1 cursor-pointer rounded-lg border border-(--vscode-button-border,transparent) px-3 py-2.5 text-left ${
-                        branch.isCurrent
-                          ? "bg-[color-mix(in_srgb,var(--vscode-button-background)_70%,transparent)] text-(--vscode-button-foreground)"
-                          : "bg-(--vscode-button-secondaryBackground) text-(--vscode-button-secondaryForeground)"
-                      }`}
+                    <Button
+                      className="h-8 w-8 p-0"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        onPullFromOrigin(branch.name);
+                      }}
+                      title={`Pull ${branch.name} from origin`}
+                    >
+                      <ArrowDownToLine
+                        aria-hidden="true"
+                        className="mx-auto"
+                        size={14}
+                      />
+                    </Button>
+                    <Button
+                      className="flex-1 text-left"
+                      size="lg"
+                      variant={branch.isCurrent ? "primary" : "secondary"}
                       onClick={() => {
                         onSwitchBranch(branch.name);
                       }}
-                      type="button"
                     >
-                      <span className="mb-0.5 block font-semibold">{branch.name}</span>
+                      <span className="mb-0.5 block font-semibold">
+                        {branch.name}
+                      </span>
                       <span className="text-xs text-(--vscode-descriptionForeground)">
                         {branch.lastCommitDescription}
                         {branch.isCurrent ? " • current" : ""}
                       </span>
-                    </button>
+                    </Button>
 
-                    <button
-                      className="min-w-max cursor-pointer rounded-md border border-(--vscode-button-border,transparent) bg-(--vscode-button-background) p-0.5 text-(--vscode-button-foreground)"
-                      onClick={() => {
-                        onMergeBaseIntoBranch(branch.name);
-                      }}
-                      title={`Merge ${baseBranchName} into ${branch.name}`}
-                      type="button"
-                    >
-                      <span className="relative block h-7 min-w-[116px]">
-                        {mergeArrowSvg ? (
-                          <img
-                            alt=""
-                            aria-hidden="true"
-                            className="pointer-events-none absolute inset-0 h-full w-full object-fill"
-                            src={mergeArrowSvg}
-                          />
-                        ) : null}
-                        <span className="pointer-events-none absolute inset-0 flex items-center justify-center px-2.5 text-center font-semibold text-(--vscode-button-foreground)">
-                          {baseBranchName}
-                        </span>
-                      </span>
-                    </button>
+                    {branch.name === baseBranchName ? null : (
+                      <Button
+                        className="h-8 w-8 p-0"
+                        size="sm"
+                        variant="primary"
+                        onClick={() => {
+                          onMergeBaseIntoBranch(branch.name);
+                        }}
+                        title={`Merge ${baseBranchName} into ${branch.name}`}
+                      >
+                        <GitMerge
+                          aria-hidden="true"
+                          className="mx-auto"
+                          size={14}
+                        />
+                      </Button>
+                    )}
                   </div>
                 ))
               )}
@@ -382,61 +577,59 @@ function App() {
 
             <div className="my-1 h-px w-full bg-(--vscode-panel-border)" />
 
-            <div className="w-full rounded-lg border border-(--vscode-panel-border) bg-(--vscode-editor-background) px-3 py-2.5 font-bold">
+            <Card className="w-full px-3 py-2.5 font-bold" padding="none">
               Current PRs
-            </div>
+            </Card>
 
             {!authStatus.isProviderAvailable ? (
-              <div className="rounded-lg border border-(--vscode-panel-border) bg-(--vscode-editor-background) px-3 py-2.5 text-(--vscode-descriptionForeground)">
-                <div className="mb-2">GitHub authentication provider is not available in this host.</div>
-                <button
-                  className="cursor-pointer rounded-md border border-(--vscode-button-border,transparent) bg-(--vscode-button-background) px-2.5 py-1.5 text-(--vscode-button-foreground)"
-                  onClick={onOpenGithubAccounts}
-                  type="button"
-                >
+              <Card
+                className="px-3 py-2.5 text-(--vscode-descriptionForeground)"
+                padding="none"
+              >
+                <div className="mb-2">
+                  GitHub authentication provider is not available in this host.
+                </div>
+                <Button variant="primary" onClick={onOpenGithubAccounts}>
                   Open Accounts
-                </button>
-              </div>
+                </Button>
+              </Card>
             ) : !authStatus.isAuthenticated ? (
-              <div className="rounded-lg border border-(--vscode-panel-border) bg-(--vscode-editor-background) px-3 py-2.5 text-(--vscode-descriptionForeground)">
-                <div className="mb-2">Sign in to GitHub to load and merge pull requests.</div>
-                <button
-                  className="cursor-pointer rounded-md border border-(--vscode-button-border,transparent) bg-(--vscode-button-background) px-2.5 py-1.5 text-(--vscode-button-foreground)"
-                  onClick={onSignInGithub}
-                  type="button"
-                >
+              <Card
+                className="px-3 py-2.5 text-(--vscode-descriptionForeground)"
+                padding="none"
+              >
+                <div className="mb-2">
+                  Sign in to GitHub to load and merge pull requests.
+                </div>
+                <Button variant="primary" onClick={onSignInGithub}>
                   Sign in with GitHub
-                </button>
-              </div>
+                </Button>
+              </Card>
             ) : (
               <>
                 <div className="flex gap-2">
-                  <button
-                    className={`flex-1 cursor-pointer rounded-md border border-(--vscode-button-border,transparent) px-2.5 py-1.5 ${
-                      pullRequestFilter === "ready"
-                        ? "bg-(--vscode-button-background) text-(--vscode-button-foreground)"
-                        : "bg-(--vscode-button-secondaryBackground) text-(--vscode-button-secondaryForeground)"
-                    }`}
+                  <Button
+                    className="flex-1"
+                    variant={
+                      pullRequestFilter === "ready" ? "primary" : "secondary"
+                    }
                     onClick={() => {
                       setPullRequestFilter("ready");
                     }}
-                    type="button"
                   >
                     Ready
-                  </button>
-                  <button
-                    className={`flex-1 cursor-pointer rounded-md border border-(--vscode-button-border,transparent) px-2.5 py-1.5 ${
-                      pullRequestFilter === "draft"
-                        ? "bg-(--vscode-button-background) text-(--vscode-button-foreground)"
-                        : "bg-(--vscode-button-secondaryBackground) text-(--vscode-button-secondaryForeground)"
-                    }`}
+                  </Button>
+                  <Button
+                    className="flex-1"
+                    variant={
+                      pullRequestFilter === "draft" ? "primary" : "secondary"
+                    }
                     onClick={() => {
                       setPullRequestFilter("draft");
                     }}
-                    type="button"
                   >
                     Draft
-                  </button>
+                  </Button>
                 </div>
 
                 <div className="flex min-h-14 flex-col gap-2">
@@ -451,21 +644,34 @@ function App() {
                   ) : (
                     visiblePullRequests.map((pullRequest) => (
                       <div className="flex gap-2" key={pullRequest.id}>
-                        <button
-                          className="w-full cursor-pointer rounded-lg border border-(--vscode-button-border,transparent) bg-(--vscode-button-secondaryBackground) px-3 py-2.5 text-left text-(--vscode-button-secondaryForeground)"
+                        <Button
+                          className="text-left"
                           onClick={() => {
                             onOpenPullRequest(pullRequest.url);
                           }}
-                          type="button"
+                          size="lg"
+                          variant="secondary"
+                          width="full"
                         >
-                          <span className="mb-0.5 block font-semibold">{pullRequest.title}</span>
+                          <span className="mb-0.5 block font-semibold">
+                            {pullRequest.title}
+                          </span>
                           {(() => {
                             const badge = getPullRequestBadge(pullRequest);
                             const StatusIcon = badge.icon;
                             return (
                               <span className="flex items-center gap-2 text-xs">
-                                <span className="text-(--vscode-descriptionForeground)">{pullRequest.branchName}</span>
-                                <span style={{ color: "var(--vscode-descriptionForeground)" }}>•</span>
+                                <span className="text-(--vscode-descriptionForeground)">
+                                  {pullRequest.branchName}
+                                </span>
+                                <span
+                                  style={{
+                                    color:
+                                      "var(--vscode-descriptionForeground)",
+                                  }}
+                                >
+                                  •
+                                </span>
                                 <span
                                   className="flex items-center gap-1.5 font-semibold lowercase"
                                   style={{ color: badge.color }}
@@ -479,20 +685,25 @@ function App() {
                               </span>
                             );
                           })()}
-                        </button>
+                        </Button>
 
                         {pullRequest.isDraft ? null : (
-                          <button
-                            className="min-w-[74px] cursor-pointer rounded-md border border-(--vscode-button-border,transparent) bg-(--vscode-button-background) px-2 py-1.5 text-(--vscode-button-foreground)"
+                          <Button
+                            className="min-w-[74px]"
+                            size="sm"
+                            variant="primary"
                             disabled={pullRequest.mergeable !== true}
                             onClick={() => {
                               onMergePullRequest(pullRequest.id);
                             }}
-                            title={pullRequest.mergeable === true ? "Merge pull request" : "Pull request is not mergeable"}
-                            type="button"
+                            title={
+                              pullRequest.mergeable === true
+                                ? "Merge pull request"
+                                : "Pull request is not mergeable"
+                            }
                           >
                             Merge
-                          </button>
+                          </Button>
                         )}
                       </div>
                     ))
@@ -500,38 +711,70 @@ function App() {
                 </div>
               </>
             )}
-          </>
+          </div>
         ) : activeTab === "logs" ? (
-          <div className="flex flex-1 flex-col">
-            <div className="mb-2 w-full rounded-lg border border-(--vscode-panel-border) bg-(--vscode-editor-background) px-3 py-2.5 font-bold">
+          <div className="flex min-h-0 flex-1 flex-col">
+            <Card className="mb-2 w-full px-3 py-2.5 font-bold" padding="none">
               Logs
-            </div>
-            <div className="flex-1 overflow-auto rounded-lg border border-(--vscode-panel-border) bg-(--vscode-editor-background) p-2 font-mono text-xs">
+            </Card>
+            <Card className="mb-2 flex items-center px-3 py-2" padding="none">
+              <label className="flex cursor-pointer items-center gap-2 text-xs">
+                <input
+                  checked={isLogAutoScrollEnabled}
+                  className="cursor-pointer"
+                  onChange={(event) => {
+                    setIsLogAutoScrollEnabled(event.target.checked);
+                  }}
+                  type="checkbox"
+                />
+                <span>Auto-scroll to newest logs</span>
+              </label>
+            </Card>
+            <Card
+              className="min-h-0 flex-1 overflow-auto font-mono text-xs"
+              padding="sm"
+              ref={logsContainerRef}
+            >
               {logs.length === 0 ? (
-                <div className="text-(--vscode-descriptionForeground)">No logs yet.</div>
+                <div className="text-(--vscode-descriptionForeground)">
+                  No logs yet.
+                </div>
               ) : (
                 logs.map((logEntry, index) => (
-                  <div className="mb-1.5 wrap-break-word" key={`${logEntry.timestampIso}-${index}`}>
+                  <div
+                    className="mb-1.5 wrap-break-word"
+                    key={`${logEntry.timestampIso}-${index}`}
+                  >
                     <span className="text-(--vscode-descriptionForeground)">
                       [{formatLogTimestamp(logEntry.timestampIso)}]
                     </span>
-                    <span className="px-1 text-(--vscode-descriptionForeground)">[</span>
-                    <span style={{ color: getLogLevelColor(logEntry.level) }}>{logEntry.level.toUpperCase()}</span>
-                    <span className="px-1 text-(--vscode-descriptionForeground)">]</span>
-                    <span className="text-(--vscode-descriptionForeground)">[{logEntry.category}]</span>
+                    <span className="px-1 text-(--vscode-descriptionForeground)">
+                      [
+                    </span>
+                    <span style={{ color: getLogLevelColor(logEntry.level) }}>
+                      {logEntry.level.toUpperCase()}
+                    </span>
+                    <span className="px-1 text-(--vscode-descriptionForeground)">
+                      ]
+                    </span>
+                    <span className="text-(--vscode-descriptionForeground)">
+                      [{logEntry.category}]
+                    </span>
                     <span className="px-1">{logEntry.message}</span>
                   </div>
                 ))
               )}
-            </div>
+            </Card>
           </div>
         ) : (
-          <div className="flex flex-1 flex-col">
-            <div className="mb-2 w-full rounded-lg border border-(--vscode-panel-border) bg-(--vscode-editor-background) px-3 py-2.5 font-bold">
+          <div className="flex min-h-0 flex-1 flex-col overflow-auto pr-1">
+            <Card className="mb-2 w-full px-3 py-2.5 font-bold" padding="none">
               Settings
-            </div>
-            <div className="rounded-lg border border-(--vscode-panel-border) bg-(--vscode-editor-background) p-3">
-              <div className="mb-1 text-xs text-(--vscode-descriptionForeground)">GitHub authentication</div>
+            </Card>
+            <Card>
+              <div className="mb-1 text-xs text-(--vscode-descriptionForeground)">
+                GitHub authentication
+              </div>
               <div className="mb-3 font-semibold">
                 {authStatus.isProviderAvailable
                   ? authStatus.isAuthenticated
@@ -540,75 +783,75 @@ function App() {
                   : "Provider unavailable"}
               </div>
               <div className="flex flex-col gap-2">
-                <button
-                  className="cursor-pointer rounded-md border border-(--vscode-button-border,transparent) bg-(--vscode-button-background) px-2.5 py-1.5 text-(--vscode-button-foreground)"
-                  onClick={onSignInGithub}
-                  type="button"
-                >
+                <Button variant="primary" onClick={onSignInGithub}>
                   Sign in with GitHub
-                </button>
-                <button
-                  className="cursor-pointer rounded-md border border-(--vscode-button-border,transparent) bg-(--vscode-button-secondaryBackground) px-2.5 py-1.5 text-(--vscode-button-secondaryForeground)"
+                </Button>
+                <Button
+                  variant="secondary"
                   disabled={!authStatus.isAuthenticated}
                   onClick={onSwitchGithubAccount}
-                  title={authStatus.isAuthenticated ? "Switch to another GitHub account" : "Sign in first"}
-                  type="button"
+                  title={
+                    authStatus.isAuthenticated
+                      ? "Switch to another GitHub account"
+                      : "Sign in first"
+                  }
                 >
                   Switch GitHub account
-                </button>
-                <button
-                  className="cursor-pointer rounded-md border border-(--vscode-button-border,transparent) bg-(--vscode-button-secondaryBackground) px-2.5 py-1.5 text-(--vscode-button-secondaryForeground)"
-                  onClick={onOpenGithubAccounts}
-                  type="button"
-                >
+                </Button>
+                <Button variant="secondary" onClick={onOpenGithubAccounts}>
                   Open Accounts menu
-                </button>
+                </Button>
               </div>
-            </div>
+            </Card>
+            <Card className="mt-2">
+              <div className="mb-1 text-xs text-(--vscode-descriptionForeground)">
+                About
+              </div>
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="text-(--vscode-descriptionForeground)">
+                  Version
+                </span>
+                <span className="font-mono text-xs">{extensionVersion}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-(--vscode-descriptionForeground)">
+                  Build code
+                </span>
+                <span className="font-mono text-xs">{extensionBuildCode}</span>
+              </div>
+            </Card>
           </div>
         )}
       </div>
 
-      <div className="mt-2.5 flex gap-2 border-t border-(--vscode-panel-border) pt-2">
-        <button
-          className={`flex-1 cursor-pointer rounded-md border border-(--vscode-button-border,transparent) px-2.5 py-1.5 ${
-            activeTab === "main"
-              ? "bg-(--vscode-button-background) text-(--vscode-button-foreground)"
-              : "bg-(--vscode-button-secondaryBackground) text-(--vscode-button-secondaryForeground)"
-          }`}
+      <div className="mt-2.5 flex shrink-0 gap-2 border-t border-(--vscode-panel-border) pt-2">
+        <Button
+          className="flex-1"
+          variant={activeTab === "main" ? "primary" : "secondary"}
           onClick={() => {
             setActiveTab("main");
           }}
-          type="button"
         >
           Main
-        </button>
-        <button
-          className={`flex-1 cursor-pointer rounded-md border border-(--vscode-button-border,transparent) px-2.5 py-1.5 ${
-            activeTab === "logs"
-              ? "bg-(--vscode-button-background) text-(--vscode-button-foreground)"
-              : "bg-(--vscode-button-secondaryBackground) text-(--vscode-button-secondaryForeground)"
-          }`}
+        </Button>
+        <Button
+          className="flex-1"
+          variant={activeTab === "logs" ? "primary" : "secondary"}
           onClick={() => {
             setActiveTab("logs");
           }}
-          type="button"
         >
           Logs ({logs.length})
-        </button>
-        <button
-          className={`flex-1 cursor-pointer rounded-md border border-(--vscode-button-border,transparent) px-2.5 py-1.5 ${
-            activeTab === "settings"
-              ? "bg-(--vscode-button-background) text-(--vscode-button-foreground)"
-              : "bg-(--vscode-button-secondaryBackground) text-(--vscode-button-secondaryForeground)"
-          }`}
+        </Button>
+        <Button
+          className="flex-1"
+          variant={activeTab === "settings" ? "primary" : "secondary"}
           onClick={() => {
             setActiveTab("settings");
           }}
-          type="button"
         >
           Settings
-        </button>
+        </Button>
       </div>
     </div>
   );

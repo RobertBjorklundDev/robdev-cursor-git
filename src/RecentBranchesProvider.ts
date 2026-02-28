@@ -90,7 +90,18 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
     }
 
     const mru = this.getMruForCurrentRepo();
-    const filtered = [...mru].sort((a, b) => a.localeCompare(b)).slice(0, MAX_VISIBLE_BRANCHES);
+    const baseBranchName = await this.getBaseBranchName();
+    const orderedBranchNames: string[] = [];
+    if (baseBranchName) {
+      orderedBranchNames.push(baseBranchName);
+    }
+    for (const branchName of mru) {
+      if (branchName === baseBranchName) {
+        continue;
+      }
+      orderedBranchNames.push(branchName);
+    }
+    const filtered = orderedBranchNames.slice(0, MAX_VISIBLE_BRANCHES);
     const headName = this.normalizeBranchName(this.repository.state.HEAD?.name ?? "");
     const items = await Promise.all(
       filtered.map(async (name) => {

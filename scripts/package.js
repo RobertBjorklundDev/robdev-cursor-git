@@ -1,10 +1,11 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { randomUUID } = require("node:crypto");
 const { execFileSync } = require("node:child_process");
 
 const rootDir = path.resolve(__dirname, "..");
 const packageJsonPath = path.join(rootDir, "package.json");
-const outputDir = path.join(rootDir, "built-packages");
+const outputDir = path.join(rootDir, "dist", "packages");
 
 function readJsonFile(filePath) {
   const content = fs.readFileSync(filePath, "utf8");
@@ -51,8 +52,10 @@ function run() {
 
   const packageJson = readJsonFile(packageJsonPath);
   const nextVersion = bumpPatchVersion(packageJson.version);
+  const nextBuildCode = randomUUID();
 
   packageJson.version = nextVersion;
+  packageJson.robdevBuildCode = nextBuildCode;
   writePackageJson(packageJson);
   fs.mkdirSync(outputDir, { recursive: true });
 

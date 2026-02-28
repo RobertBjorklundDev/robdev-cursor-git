@@ -24,3 +24,17 @@ Shows the top 5 most recently used local branches for the current Git repository
    - `npm run package`
 2. Install in Cursor:
    - Command Palette -> `Install from VSIX`
+
+## Local iteration loop
+
+Use this to build, package, reinstall, and reload quickly while developing:
+
+- `npm run dev:local`
+
+What it does:
+
+- Runs the existing packaging flow (`npm run package`)
+- Force-installs the generated `.vsix` into Cursor
+- Attempts to trigger `Developer: Reload Window` automatically on macOS
+
+If automatic reload is blocked (for example by macOS accessibility permissions), run `Developer: Reload Window` manually in Cursor.

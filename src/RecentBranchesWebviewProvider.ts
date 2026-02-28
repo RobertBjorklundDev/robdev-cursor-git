@@ -6,6 +6,7 @@ import type { GitHubAuthStatus, PullRequestSummary, PullRequestsProvider } from 
 interface BranchViewMessage {
   type:
     | "switchBranch"
+    | "pullFromOrigin"
     | "mergeFromBase"
     | "ready"
     | "openPullRequest"
@@ -51,8 +52,18 @@ interface WebviewSetAuthStatusMessage {
 }
 
 interface WebviewAssets {
-  mergeArrowSvg: string;
+  extensionVersion: string;
+  extensionBuildCode: string;
 }
+
+interface PersistedWebviewState {
+  branches: RecentBranch[];
+  pullRequests: PullRequestSummary[];
+  authStatus: GitHubAuthStatus;
+  baseBranchName: string;
+}
+
+const PERSISTED_WEBVIEW_STATE_KEY = "branchSwitcher.webviewState";
 
 class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
@@ -60,6 +71,9 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
   private readonly pullRequestsProvider: PullRequestsProvider;
   private readonly logStore: LogStore;
   private readonly extensionUri: vscode.Uri;
+  private readonly workspaceState: vscode.Memento;
+  private readonly extensionVersion: string;
+  private readonly extensionBuildCode: string;
   private readonly subscriptions: vscode.Disposable[] = [];
   private lastBranches: RecentBranch[] = [];
   private lastPullRequests: PullRequestSummary[] = [];
@@ -75,12 +89,19 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     provider: RecentBranchesProvider,
     pullRequestsProvider: PullRequestsProvider,
     logStore: LogStore,
-    extensionUri: vscode.Uri
+    extensionUri: vscode.Uri,
+    workspaceState: vscode.Memento,
+    extensionVersion: string,
+    extensionBuildCode: string
   ) {
     this.provider = provider;
     this.pullRequestsProvider = pullRequestsProvider;
     this.logStore = logStore;
     this.extensionUri = extensionUri;
+    this.workspaceState = workspaceState;
+    this.extensionVersion = extensionVersion;
+    this.extensionBuildCode = extensionBuildCode;
+    this.restorePersistedState();
     this.subscriptions.push(
       this.provider.onDidChangeTreeData(() => {
         void this.render();
@@ -105,7 +126,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [
-        vscode.Uri.joinPath(this.extensionUri, "media"),
+        vscode.Uri.joinPath(this.extensionUri, "dist", "media"),
         vscode.Uri.joinPath(this.extensionUri, "resources")
       ]
     };
@@ -145,6 +166,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       this.lastPullRequests = pullRequests;
       this.lastAuthStatus = authStatus;
       this.isLoading = false;
+      await this.persistCurrentState();
       this.postBranchesUpdate(branches, baseBranchName, this.isLoading);
       this.postPullRequestsUpdate(pullRequests);
       this.postAuthStatus(authStatus);
@@ -276,20 +298,25 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
 
     if (message.type === "mergeFromBase") {
       await vscode.commands.executeCommand("branchSwitcher.mergeFromBase", message.branchName);
+      return;
+    }
+
+    if (message.type === "pullFromOrigin") {
+      await vscode.commands.executeCommand("branchSwitcher.pullFromOrigin", message.branchName);
     }
   }
 
   private getHtml(webview: vscode.Webview) {
     const nonce = getNonce();
     const stylesheetUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, "media", "webview.css")
+      vscode.Uri.joinPath(this.extensionUri, "dist", "media", "webview.css")
     );
-    const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, "media", "webview.js"));
-    const mergeArrowUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, "resources", "merge-base-arrow.svg")
+    const scriptUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, "dist", "media", "webview.js")
     );
     const assets: WebviewAssets = {
-      mergeArrowSvg: mergeArrowUri.toString()
+      extensionVersion: this.extensionVersion,
+      extensionBuildCode: this.extensionBuildCode
     };
     const csp = [
       "default-src 'none'",
@@ -315,6 +342,43 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
   </body>
 </html>`;
   }
+
+  private restorePersistedState() {
+    const persistedState = this.workspaceState.get<unknown>(PERSISTED_WEBVIEW_STATE_KEY);
+    if (!isPersistedWebviewState(persistedState)) {
+      return;
+    }
+    this.lastBranches = persistedState.branches;
+    this.lastPullRequests = persistedState.pullRequests;
+    this.lastAuthStatus = persistedState.authStatus;
+    this.lastBaseBranchName = persistedState.baseBranchName;
+  }
+
+  private async persistCurrentState() {
+    const state: PersistedWebviewState = {
+      branches: this.lastBranches,
+      pullRequests: this.lastPullRequests,
+      authStatus: this.lastAuthStatus,
+      baseBranchName: this.lastBaseBranchName
+    };
+    await this.workspaceState.update(PERSISTED_WEBVIEW_STATE_KEY, state);
+  }
+}
+
+function isPersistedWebviewState(value: unknown): value is PersistedWebviewState {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<PersistedWebviewState>;
+  return (
+    Array.isArray(candidate.branches) &&
+    Array.isArray(candidate.pullRequests) &&
+    typeof candidate.baseBranchName === "string" &&
+    !!candidate.authStatus &&
+    typeof candidate.authStatus === "object" &&
+    typeof candidate.authStatus.isProviderAvailable === "boolean" &&
+    typeof candidate.authStatus.isAuthenticated === "boolean"
+  );
 }
 
 function getNonce() {
