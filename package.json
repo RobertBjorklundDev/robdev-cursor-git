@@ -7,7 +7,7 @@
   "license": "MIT",
   "displayName": "RobDev Git",
   "description": "Show top 5 recently used local branches and switch with one click.",
-  "version": "0.0.22",
+  "version": "0.0.23",
   "publisher": "local",
   "engines": {
     "vscode": "^1.85.0"
