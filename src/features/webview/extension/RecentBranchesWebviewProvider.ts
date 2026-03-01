@@ -1,69 +1,26 @@
 import * as vscode from "vscode";
-import type { LogEntry, LogStore } from "./LogStore";
-import type { RecentBranch, RecentBranchesProvider } from "./RecentBranchesProvider";
-import type { GitHubAuthStatus, PullRequestSummary, PullRequestsProvider } from "./PullRequestsProvider";
-
-interface BranchViewMessage {
-  type:
-    | "switchBranch"
-    | "pullFromOrigin"
-    | "mergeFromBase"
-    | "ready"
-    | "openPullRequest"
-    | "mergePullRequest"
-    | "signInGithub"
-    | "switchGithubAccount"
-    | "openGithubAccounts";
-  branchName?: string;
-  pullRequestId?: number;
-  pullRequestUrl?: string;
-}
-
-interface WebviewSetBranchesMessage {
-  type: "setBranches";
-  branches: RecentBranch[];
-  baseBranchName: string;
-  isLoading: boolean;
-}
-
-interface WebviewSetLoadingMessage {
-  type: "setLoading";
-  isLoading: boolean;
-}
-
-interface WebviewSetPullRequestsMessage {
-  type: "setPullRequests";
-  pullRequests: PullRequestSummary[];
-}
-
-interface WebviewSetLogsMessage {
-  type: "setLogs";
-  logs: LogEntry[];
-}
-
-interface WebviewAppendLogMessage {
-  type: "appendLog";
-  log: LogEntry;
-}
-
-interface WebviewSetAuthStatusMessage {
-  type: "setAuthStatus";
-  authStatus: GitHubAuthStatus;
-}
-
-interface WebviewAssets {
-  extensionVersion: string;
-  extensionBuildCode: string;
-}
-
-interface PersistedWebviewState {
-  branches: RecentBranch[];
-  pullRequests: PullRequestSummary[];
-  authStatus: GitHubAuthStatus;
-  baseBranchName: string;
-}
+import type { LogStore } from "../../logs/extension";
+import type { RecentBranchesProvider } from "../../branches/extension";
+import type { PullRequestsProvider } from "../../pull-requests/extension";
+import type {
+  BranchActionMessage,
+  GitHubAuthStatus,
+  LogEntry,
+  PersistedWebviewState,
+  PullRequestSummary,
+  RecentBranch,
+  WebviewAssets,
+  WebviewAppendLogMessage,
+  WebviewSetAuthStatusMessage,
+  WebviewSetBranchesMessage,
+  WebviewSetLoadingMessage,
+  WebviewSetLogsMessage,
+  WebviewSetPullRequestsMessage,
+} from "../../../shared/webview/contracts";
 
 const PERSISTED_WEBVIEW_STATE_KEY = "branchSwitcher.webviewState";
+const VISIBLE_REFRESH_INTERVAL_MS = 60_000;
+const VISIBILITY_REFRESH_COOLDOWN_MS = 10_000;
 
 class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
@@ -79,11 +36,13 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
   private lastPullRequests: PullRequestSummary[] = [];
   private lastAuthStatus: GitHubAuthStatus = {
     isProviderAvailable: true,
-    isAuthenticated: false
+    isAuthenticated: false,
   };
   private lastBaseBranchName = "main";
   private isLoading = false;
   private hasInitializedHtml = false;
+  private visibleRefreshTimer: ReturnType<typeof setInterval> | undefined;
+  private lastVisibilityRefreshAt = 0;
 
   public constructor(
     provider: RecentBranchesProvider,
@@ -92,7 +51,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     extensionUri: vscode.Uri,
     workspaceState: vscode.Memento,
     extensionVersion: string,
-    extensionBuildCode: string
+    extensionBuildCode: string,
   ) {
     this.provider = provider;
     this.pullRequestsProvider = pullRequestsProvider;
@@ -111,30 +70,77 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       }),
       this.logStore.onDidAppend((entry) => {
         this.postAppendLog(entry);
-      })
+      }),
     );
   }
 
   public dispose() {
+    this.stopVisibleRefreshTimer();
     for (const subscription of this.subscriptions) {
       subscription.dispose();
     }
   }
 
   public resolveWebviewView(webviewView: vscode.WebviewView) {
+    this.stopVisibleRefreshTimer();
     this.view = webviewView;
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [
         vscode.Uri.joinPath(this.extensionUri, "dist", "media"),
-        vscode.Uri.joinPath(this.extensionUri, "resources")
-      ]
+        vscode.Uri.joinPath(this.extensionUri, "resources"),
+      ],
     };
-    webviewView.webview.onDidReceiveMessage((message: BranchViewMessage) => {
+    webviewView.webview.onDidReceiveMessage((message: BranchActionMessage) => {
       void this.handleMessage(message);
     });
+    this.subscriptions.push(
+      webviewView.onDidChangeVisibility(() => {
+        this.handleVisibilityChanged();
+      }),
+    );
     this.hasInitializedHtml = false;
-    void this.render();
+    this.handleVisibilityChanged();
+  }
+
+  private handleVisibilityChanged() {
+    if (!this.view) {
+      this.stopVisibleRefreshTimer();
+      return;
+    }
+
+    if (!this.view.visible) {
+      this.stopVisibleRefreshTimer();
+      return;
+    }
+
+    this.startVisibleRefreshTimer();
+
+    const now = Date.now();
+    if (now - this.lastVisibilityRefreshAt >= VISIBILITY_REFRESH_COOLDOWN_MS) {
+      this.lastVisibilityRefreshAt = now;
+      void this.render();
+    }
+  }
+
+  private startVisibleRefreshTimer() {
+    if (this.visibleRefreshTimer) {
+      return;
+    }
+    this.visibleRefreshTimer = setInterval(() => {
+      if (!this.view?.visible) {
+        return;
+      }
+      void this.render();
+    }, VISIBLE_REFRESH_INTERVAL_MS);
+  }
+
+  private stopVisibleRefreshTimer() {
+    if (!this.visibleRefreshTimer) {
+      return;
+    }
+    clearInterval(this.visibleRefreshTimer);
+    this.visibleRefreshTimer = undefined;
   }
 
   private async render() {
@@ -146,7 +152,11 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     if (!this.hasInitializedHtml) {
       this.view.webview.html = this.getHtml(this.view.webview);
       this.hasInitializedHtml = true;
-      this.postBranchesUpdate(this.lastBranches, this.lastBaseBranchName, this.isLoading);
+      this.postBranchesUpdate(
+        this.lastBranches,
+        this.lastBaseBranchName,
+        this.isLoading,
+      );
       this.postPullRequestsUpdate(this.lastPullRequests);
       this.postAuthStatus(this.lastAuthStatus);
       this.postLogs(this.logStore.getEntries());
@@ -155,12 +165,13 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     try {
-      const [branches, baseBranchName, pullRequests, authStatus] = await Promise.all([
-        this.provider.getRecentBranches(),
-        this.provider.getBaseBranchName(),
-        this.pullRequestsProvider.getPullRequests(),
-        this.pullRequestsProvider.getAuthStatus()
-      ]);
+      const [branches, baseBranchName, pullRequests, authStatus] =
+        await Promise.all([
+          this.provider.getRecentBranches(),
+          this.provider.getBaseBranchName(),
+          this.pullRequestsProvider.getPullRequests(),
+          this.pullRequestsProvider.getAuthStatus(),
+        ]);
       this.lastBranches = branches;
       this.lastBaseBranchName = baseBranchName;
       this.lastPullRequests = pullRequests;
@@ -172,7 +183,11 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       this.postAuthStatus(authStatus);
     } catch {
       this.isLoading = false;
-      this.postBranchesUpdate(this.lastBranches, this.lastBaseBranchName, this.isLoading);
+      this.postBranchesUpdate(
+        this.lastBranches,
+        this.lastBaseBranchName,
+        this.isLoading,
+      );
       this.postPullRequestsUpdate(this.lastPullRequests);
       this.postAuthStatus(this.lastAuthStatus);
     }
@@ -184,12 +199,16 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     }
     const message: WebviewSetLoadingMessage = {
       type: "setLoading",
-      isLoading
+      isLoading,
     };
     this.view.webview.postMessage(message);
   }
 
-  private postBranchesUpdate(branches: RecentBranch[], baseBranchName: string, isLoading: boolean) {
+  private postBranchesUpdate(
+    branches: RecentBranch[],
+    baseBranchName: string,
+    isLoading: boolean,
+  ) {
     if (!this.view) {
       return;
     }
@@ -197,7 +216,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       type: "setBranches",
       branches,
       baseBranchName,
-      isLoading
+      isLoading,
     };
     this.view.webview.postMessage(message);
   }
@@ -208,7 +227,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     }
     const message: WebviewSetPullRequestsMessage = {
       type: "setPullRequests",
-      pullRequests
+      pullRequests,
     };
     this.view.webview.postMessage(message);
   }
@@ -219,7 +238,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     }
     const message: WebviewSetLogsMessage = {
       type: "setLogs",
-      logs
+      logs,
     };
     this.view.webview.postMessage(message);
   }
@@ -230,7 +249,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     }
     const message: WebviewAppendLogMessage = {
       type: "appendLog",
-      log
+      log,
     };
     this.view.webview.postMessage(message);
   }
@@ -241,14 +260,23 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     }
     const message: WebviewSetAuthStatusMessage = {
       type: "setAuthStatus",
-      authStatus
+      authStatus,
     };
     this.view.webview.postMessage(message);
   }
 
-  private async handleMessage(message: BranchViewMessage) {
+  private async handleMessage(message: BranchActionMessage) {
+    if (message.type === "requestRefresh") {
+      void this.render();
+      return;
+    }
+
     if (message.type === "ready") {
-      this.postBranchesUpdate(this.lastBranches, this.lastBaseBranchName, this.isLoading);
+      this.postBranchesUpdate(
+        this.lastBranches,
+        this.lastBaseBranchName,
+        this.isLoading,
+      );
       this.postPullRequestsUpdate(this.lastPullRequests);
       this.postAuthStatus(this.lastAuthStatus);
       this.postLogs(this.logStore.getEntries());
@@ -261,7 +289,9 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     if (message.type === "switchGithubAccount") {
-      await vscode.commands.executeCommand("branchSwitcher.switchGithubAccount");
+      await vscode.commands.executeCommand(
+        "branchSwitcher.switchGithubAccount",
+      );
       return;
     }
 
@@ -283,7 +313,21 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       if (typeof message.pullRequestId !== "number") {
         return;
       }
-      await vscode.commands.executeCommand("branchSwitcher.mergePullRequest", message.pullRequestId);
+      await vscode.commands.executeCommand(
+        "branchSwitcher.mergePullRequest",
+        message.pullRequestId,
+      );
+      return;
+    }
+
+    if (message.type === "markPullRequestReady") {
+      if (typeof message.pullRequestId !== "number") {
+        return;
+      }
+      await vscode.commands.executeCommand(
+        "branchSwitcher.markPullRequestReady",
+        message.pullRequestId,
+      );
       return;
     }
 
@@ -292,37 +336,46 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     if (message.type === "switchBranch") {
-      await vscode.commands.executeCommand("branchSwitcher.switchBranch", message.branchName);
+      await vscode.commands.executeCommand(
+        "branchSwitcher.switchBranch",
+        message.branchName,
+      );
       return;
     }
 
     if (message.type === "mergeFromBase") {
-      await vscode.commands.executeCommand("branchSwitcher.mergeFromBase", message.branchName);
+      await vscode.commands.executeCommand(
+        "branchSwitcher.mergeFromBase",
+        message.branchName,
+      );
       return;
     }
 
     if (message.type === "pullFromOrigin") {
-      await vscode.commands.executeCommand("branchSwitcher.pullFromOrigin", message.branchName);
+      await vscode.commands.executeCommand(
+        "branchSwitcher.pullFromOrigin",
+        message.branchName,
+      );
     }
   }
 
   private getHtml(webview: vscode.Webview) {
     const nonce = getNonce();
     const stylesheetUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, "dist", "media", "webview.css")
+      vscode.Uri.joinPath(this.extensionUri, "dist", "media", "webview.css"),
     );
     const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, "dist", "media", "webview.js")
+      vscode.Uri.joinPath(this.extensionUri, "dist", "media", "webview.js"),
     );
     const assets: WebviewAssets = {
       extensionVersion: this.extensionVersion,
-      extensionBuildCode: this.extensionBuildCode
+      extensionBuildCode: this.extensionBuildCode,
     };
     const csp = [
       "default-src 'none'",
       `style-src ${webview.cspSource}`,
       `img-src ${webview.cspSource} data:`,
-      `script-src ${webview.cspSource} 'nonce-${nonce}'`
+      `script-src ${webview.cspSource} 'nonce-${nonce}'`,
     ].join("; ");
 
     return `<!DOCTYPE html>
@@ -344,7 +397,9 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private restorePersistedState() {
-    const persistedState = this.workspaceState.get<unknown>(PERSISTED_WEBVIEW_STATE_KEY);
+    const persistedState = this.workspaceState.get<unknown>(
+      PERSISTED_WEBVIEW_STATE_KEY,
+    );
     if (!isPersistedWebviewState(persistedState)) {
       return;
     }
@@ -359,13 +414,15 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       branches: this.lastBranches,
       pullRequests: this.lastPullRequests,
       authStatus: this.lastAuthStatus,
-      baseBranchName: this.lastBaseBranchName
+      baseBranchName: this.lastBaseBranchName,
     };
     await this.workspaceState.update(PERSISTED_WEBVIEW_STATE_KEY, state);
   }
 }
 
-function isPersistedWebviewState(value: unknown): value is PersistedWebviewState {
+function isPersistedWebviewState(
+  value: unknown,
+): value is PersistedWebviewState {
   if (!value || typeof value !== "object") {
     return false;
   }
@@ -382,7 +439,8 @@ function isPersistedWebviewState(value: unknown): value is PersistedWebviewState
 }
 
 function getNonce() {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   let value = "";
   for (let index = 0; index < 32; index += 1) {
     value += chars.charAt(Math.floor(Math.random() * chars.length));

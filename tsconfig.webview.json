@@ -9,5 +9,12 @@
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "include": ["webview/**/*.ts", "webview/**/*.tsx"]
+  "include": [
+    "src/app/webview/**/*.ts",
+    "src/app/webview/**/*.tsx",
+    "src/features/**/webview/**/*.ts",
+    "src/features/**/webview/**/*.tsx",
+    "src/shared/webview/**/*.ts",
+    "src/shared/webview/**/*.tsx"
+  ]
 }

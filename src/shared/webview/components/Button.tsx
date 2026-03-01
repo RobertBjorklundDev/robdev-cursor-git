@@ -41,7 +41,7 @@ function getClassName(parts: Array<string | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-export function Button({
+function Button({
   className,
   size = "md",
   type = "button",
@@ -54,8 +54,10 @@ export function Button({
     getVariantClasses(variant),
     getSizeClasses(size),
     getWidthClasses(width),
-    className,
+    className
   ]);
 
   return <button className={classes} type={type} {...props} />;
 }
+
+export { Button };

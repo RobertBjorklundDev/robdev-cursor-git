@@ -1,16 +1,13 @@
 import * as vscode from "vscode";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { LogStore } from "./LogStore";
-import type { Repository } from "./types";
+import type { LogStore } from "../../logs/extension";
+import type { Repository } from "../../../shared/extension";
+import type { RecentBranch } from "../../../shared/webview/contracts";
 
 const MAX_STORED_BRANCHES = 20;
 const MAX_VISIBLE_BRANCHES = 5;
-interface RecentBranch {
-  name: string;
-  isCurrent: boolean;
-  lastCommitDescription: string;
-}
+
 type ExecFileAsync = (
   file: string,
   args: string[],
@@ -79,12 +76,10 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
 
   public async getChildren() {
     const branches = await this.getRecentBranches();
-    return branches.map(
-      (branch) => new BranchItem(branch.name, branch.isCurrent, branch.lastCommitDescription)
-    );
+    return branches.map((branch) => new BranchItem(branch.name, branch.isCurrent, branch.lastCommitDescription));
   }
 
-  public async getRecentBranches() {
+  public async getRecentBranches(): Promise<RecentBranch[]> {
     if (!this.repository) {
       return [];
     }

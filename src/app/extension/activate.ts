@@ -1,11 +1,11 @@
 import * as vscode from "vscode";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { LogStore } from "./LogStore";
-import { RecentBranchesProvider } from "./RecentBranchesProvider";
-import { RecentBranchesWebviewProvider } from "./RecentBranchesWebviewProvider";
-import { PullRequestsProvider } from "./PullRequestsProvider";
-import type { GitAPI, GitExtensionExports, Repository } from "./types";
+import { LogStore } from "../../features/logs/extension";
+import { RecentBranchesProvider } from "../../features/branches/extension";
+import { RecentBranchesWebviewProvider } from "../../features/webview/extension";
+import { PullRequestsProvider } from "../../features/pull-requests/extension";
+import type { GitAPI, GitExtensionExports, Repository } from "../../shared/extension";
 
 interface ExtensionPackageJson {
   version?: unknown;
@@ -30,14 +30,9 @@ async function activate(context: vscode.ExtensionContext) {
   const provider = new RecentBranchesProvider(context.workspaceState, logStore);
   const pullRequestsProvider = new PullRequestsProvider(logStore);
   const extensionPackageJson = context.extension.packageJSON as ExtensionPackageJson;
-  const extensionVersion =
-    typeof extensionPackageJson.version === "string"
-      ? extensionPackageJson.version
-      : "unknown";
+  const extensionVersion = typeof extensionPackageJson.version === "string" ? extensionPackageJson.version : "unknown";
   const extensionBuildCode =
-    typeof extensionPackageJson.robdevBuildCode === "string"
-      ? extensionPackageJson.robdevBuildCode
-      : "dev";
+    typeof extensionPackageJson.robdevBuildCode === "string" ? extensionPackageJson.robdevBuildCode : "dev";
   const webviewProvider = new RecentBranchesWebviewProvider(
     provider,
     pullRequestsProvider,
@@ -47,15 +42,11 @@ async function activate(context: vscode.ExtensionContext) {
     extensionVersion,
     extensionBuildCode
   );
-  const webviewDisposable = vscode.window.registerWebviewViewProvider(
-    "recentBranchesView",
-    webviewProvider,
-    {
-      webviewOptions: {
-        retainContextWhenHidden: true
-      }
+  const webviewDisposable = vscode.window.registerWebviewViewProvider("recentBranchesView", webviewProvider, {
+    webviewOptions: {
+      retainContextWhenHidden: true
     }
-  );
+  });
   context.subscriptions.push(webviewDisposable);
   context.subscriptions.push(webviewProvider);
 
@@ -240,6 +231,19 @@ async function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  const markPullRequestReadyDisposable = vscode.commands.registerCommand(
+    "branchSwitcher.markPullRequestReady",
+    async (pullRequestId: number) => {
+      const result = await pullRequestsProvider.markPullRequestReady(pullRequestId);
+      if (result.ok) {
+        logStore.info("commands", result.message);
+      } else {
+        logStore.error("commands", result.message);
+      }
+      pullRequestsProvider.refresh();
+    }
+  );
+
   const signInGithubDisposable = vscode.commands.registerCommand("branchSwitcher.signInGithub", async () => {
     const didSignIn = await pullRequestsProvider.signIn();
     if (!didSignIn) {
@@ -275,6 +279,7 @@ async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(pullFromOriginDisposable);
   context.subscriptions.push(mergeFromBaseDisposable);
   context.subscriptions.push(mergePullRequestDisposable);
+  context.subscriptions.push(markPullRequestReadyDisposable);
   context.subscriptions.push(signInGithubDisposable);
   context.subscriptions.push(switchGithubAccountDisposable);
   context.subscriptions.push(openGithubAccountsDisposable);
@@ -308,11 +313,12 @@ async function resolveBaseBranch(
   logStore: LogStore
 ) {
   try {
-    const result = await runGit(repository, execFileAsync, [
-      "symbolic-ref",
-      "--short",
-      "refs/remotes/origin/HEAD"
-    ], logStore);
+    const result = await runGit(
+      repository,
+      execFileAsync,
+      ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+      logStore
+    );
     const normalized = result.trim();
     if (normalized.startsWith("origin/")) {
       return normalized.slice("origin/".length);

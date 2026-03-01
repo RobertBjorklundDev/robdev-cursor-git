@@ -20,15 +20,17 @@ function getClassName(parts: Array<string | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-export const Card = React.forwardRef<HTMLDivElement, CardProps>(function Card(
+const Card = React.forwardRef<HTMLDivElement, CardProps>(function Card(
   { className, padding = "md", ...props },
-  ref,
+  ref
 ) {
   const classes = getClassName([
     "rounded-lg border border-(--vscode-panel-border) bg-(--vscode-editor-background)",
     getCardPaddingClasses(padding),
-    className,
+    className
   ]);
 
   return <div className={classes} ref={ref} {...props} />;
 });
+
+export { Card };
