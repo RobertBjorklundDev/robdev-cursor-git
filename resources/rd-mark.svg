@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">
+  <defs>
+    <!-- Cut the D wherever it overlaps the R (R takes precedence) -->
+    <mask id="cut-d-by-r">
+      <rect width="1024" height="1024" fill="white"/>
+
+      <!-- In the mask, make the R slightly "fatter" than the visible strokes for a crisp knockout -->
+      <!-- Stem slightly wider than the rest -->
+      <g stroke="black" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M360 220 V804" stroke-width="108"/>
+        <path d="M360 220 H560 A170 170 0 0 1 560 560 H360" stroke-width="96"/>
+        <path d="M360 560 L660 804" stroke-width="96"/>
+      </g>
+    </mask>
+  </defs>
+
+  <!-- D: scaled to ~95% of R, then moved down by ~one stroke-width -->
+  <g
+    mask="url(#cut-d-by-r)"
+    stroke="currentColor"
+    stroke-width="84"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    transform="translate(560 512) scale(0.95) translate(-560 -512) translate(0 84)"
+  >
+    <!-- D stem -->
+    <path d="M520 300 V724"/>
+    <!-- D curve -->
+    <path d="M520 300 H660 A212 212 0 0 1 660 724 H520"/>
+  </g>
+
+  <!-- R on top -->
+  <g stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Make the left stem a tiny bit wider -->
+    <path d="M360 220 V804" stroke-width="92"/>
+    <path d="M360 220 H560 A170 170 0 0 1 560 560 H360" stroke-width="84"/>
+    <path d="M360 560 L660 804" stroke-width="84"/>
+  </g>
+</svg>

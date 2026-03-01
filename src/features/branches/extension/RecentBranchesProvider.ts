@@ -1,16 +1,13 @@
 import * as vscode from "vscode";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { LogStore } from "./LogStore";
-import type { Repository } from "./types";
+import type { LogStore } from "../../logs/extension";
+import type { Repository } from "../../../shared/extension";
+import type { RecentBranch } from "../../../shared/webview/contracts";
 
 const MAX_STORED_BRANCHES = 20;
 const MAX_VISIBLE_BRANCHES = 5;
-interface RecentBranch {
-  name: string;
-  isCurrent: boolean;
-  lastCommitDescription: string;
-}
+
 type ExecFileAsync = (
   file: string,
   args: string[],
@@ -24,11 +21,11 @@ class BranchItem extends vscode.TreeItem {
     super(branchName, vscode.TreeItemCollapsibleState.None);
     this.branchName = branchName;
     this.command = {
-      command: "branchSwitcher.switchBranch",
+      command: "rd-git.switchBranch",
       title: "Switch Branch",
       arguments: [branchName]
     };
-    this.contextValue = "branchSwitcher.branchItem";
+    this.contextValue = "rd-git.branchItem";
     this.description = isCurrent ? `current • ${lastCommitDescription}` : lastCommitDescription;
   }
 }
@@ -79,18 +76,27 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
 
   public async getChildren() {
     const branches = await this.getRecentBranches();
-    return branches.map(
-      (branch) => new BranchItem(branch.name, branch.isCurrent, branch.lastCommitDescription)
-    );
+    return branches.map((branch) => new BranchItem(branch.name, branch.isCurrent, branch.lastCommitDescription));
   }
 
-  public async getRecentBranches() {
+  public async getRecentBranches(): Promise<RecentBranch[]> {
     if (!this.repository) {
       return [];
     }
 
     const mru = this.getMruForCurrentRepo();
-    const filtered = [...mru].sort((a, b) => a.localeCompare(b)).slice(0, MAX_VISIBLE_BRANCHES);
+    const baseBranchName = await this.getBaseBranchName();
+    const orderedBranchNames: string[] = [];
+    if (baseBranchName) {
+      orderedBranchNames.push(baseBranchName);
+    }
+    for (const branchName of mru) {
+      if (branchName === baseBranchName) {
+        continue;
+      }
+      orderedBranchNames.push(branchName);
+    }
+    const filtered = orderedBranchNames.slice(0, MAX_VISIBLE_BRANCHES);
     const headName = this.normalizeBranchName(this.repository.state.HEAD?.name ?? "");
     const items = await Promise.all(
       filtered.map(async (name) => {
@@ -124,7 +130,7 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
   }
 
   private getStorageKey(repoPath: string) {
-    return `branchSwitcher.mru.${repoPath}`;
+    return `rd-git.mru.${repoPath}`;
   }
 
   private getMruForCurrentRepo() {

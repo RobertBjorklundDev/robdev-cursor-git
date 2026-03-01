@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">
+  <defs>
+    <mask id="cut-d-by-r">
+      <rect width="1024" height="1024" fill="white"/>
+      <g stroke="black" stroke-width="92" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M420 320 V704"/>
+        <path d="M420 320 H520 A120 120 0 0 1 520 560 H420"/>
+        <path d="M420 560 L560 704"/>
+      </g>
+    </mask>
+  </defs>
+
+  <!-- Background (rounded square) -->
+  <rect width="1024" height="1024" rx="220" fill="#FFFFFF"/>
+
+  <!-- Mark -->
+  <g style="color:#111111">
+    <g mask="url(#cut-d-by-r)" stroke="currentColor" stroke-width="80" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M390 320 V704"/>
+      <path d="M390 320 H560 A192 192 0 0 1 560 704 H390"/>
+    </g>
+    <g stroke="currentColor" stroke-width="80" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M420 320 V704"/>
+      <path d="M420 320 H520 A120 120 0 0 1 520 560 H420"/>
+      <path d="M420 560 L560 704"/>
+    </g>
+  </g>
+</svg>

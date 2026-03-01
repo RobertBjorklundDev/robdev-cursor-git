@@ -1,15 +1,7 @@
 import * as vscode from "vscode";
+import type { LogEntry, LogLevel } from "../../../shared/webview/contracts";
 
 const MAX_LOG_ENTRIES = 500;
-
-type LogLevel = "info" | "warn" | "error";
-
-interface LogEntry {
-  timestampIso: string;
-  level: LogLevel;
-  category: string;
-  message: string;
-}
 
 class LogStore {
   private readonly entries: LogEntry[] = [];
@@ -31,6 +23,10 @@ class LogStore {
 
   public error(category: string, message: string) {
     this.append("error", category, message);
+  }
+
+  public clear() {
+    this.entries.length = 0;
   }
 
   private append(level: LogLevel, category: string, message: string) {

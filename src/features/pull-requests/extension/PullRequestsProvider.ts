@@ -1,28 +1,13 @@
 import * as vscode from "vscode";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { LogStore } from "./LogStore";
-import type { Repository } from "./types";
+import type { LogStore } from "../../logs/extension";
+import type { Repository } from "../../../shared/extension";
+import type { GitHubAuthStatus, PullRequestSummary } from "../../../shared/webview/contracts";
 
 const MAX_VISIBLE_PULL_REQUESTS = 10;
 const GITHUB_API_URL = "https://api.github.com";
 const GITHUB_SCOPES = ["read:user", "repo"];
-
-interface PullRequestSummary {
-  id: number;
-  title: string;
-  url: string;
-  branchName: string;
-  isDraft: boolean;
-  state: string;
-  mergeable: boolean | undefined;
-  mergeableState: string | undefined;
-}
-
-interface GitHubAuthStatus {
-  isProviderAvailable: boolean;
-  isAuthenticated: boolean;
-}
 
 interface GitHubPullRequestListItem {
   number: number;
@@ -30,6 +15,10 @@ interface GitHubPullRequestListItem {
   html_url: string;
   state: string;
   draft: boolean;
+  updated_at: string;
+  assignees: Array<{
+    login: string;
+  }>;
   head: {
     ref: string;
   };
@@ -72,7 +61,7 @@ class PullRequestsProvider {
     this.onDidChangeDataEmitter.fire();
   }
 
-  public async getPullRequests() {
+  public async getPullRequests(): Promise<PullRequestSummary[]> {
     if (!this.repository) {
       this.logStore.warn("pull-requests", "No repository selected; skipping pull request fetch.");
       return [];
@@ -95,6 +84,7 @@ class PullRequestsProvider {
         "pull-requests",
         `Fetching open pull requests for ${targetRepository.owner}/${targetRepository.name}.`
       );
+      const viewerLogin = await this.fetchViewerLogin(session.accessToken);
       const listItems = await this.fetchOpenPullRequests(targetRepository, session.accessToken);
       const details = await this.fetchMergeabilityDetails(
         targetRepository,
@@ -105,11 +95,18 @@ class PullRequestsProvider {
 
       return listItems.map((item) => {
         const detail = details.get(item.number);
+        const assigneeLogins = item.assignees.map((assignee) => assignee.login);
+        const isAssignedToViewer = viewerLogin
+          ? assigneeLogins.some((assigneeLogin) => assigneeLogin.toLowerCase() === viewerLogin.toLowerCase())
+          : false;
         return {
           id: item.number,
           title: item.title,
           url: item.html_url,
           branchName: item.head.ref,
+          assigneeLogins,
+          isAssignedToViewer,
+          updatedAtIso: item.updated_at,
           isDraft: item.draft,
           state: item.state,
           mergeable: detail?.mergeable,
@@ -122,7 +119,7 @@ class PullRequestsProvider {
     }
   }
 
-  public async getAuthStatus() {
+  public async getAuthStatus(): Promise<GitHubAuthStatus> {
     const isProviderAvailable = await this.isGitHubProviderAvailable();
     if (!isProviderAvailable) {
       return {
@@ -198,7 +195,10 @@ class PullRequestsProvider {
         };
       }
 
-      this.logStore.info("pull-requests", `PUT /repos/${targetRepository.owner}/${targetRepository.name}/pulls/${pullRequestId}/merge`);
+      this.logStore.info(
+        "pull-requests",
+        `PUT /repos/${targetRepository.owner}/${targetRepository.name}/pulls/${pullRequestId}/merge`
+      );
       const response = await fetch(
         `${GITHUB_API_URL}/repos/${targetRepository.owner}/${targetRepository.name}/pulls/${pullRequestId}/merge`,
         {
@@ -228,6 +228,80 @@ class PullRequestsProvider {
       return {
         ok: false,
         message: "Failed to merge pull request."
+      };
+    }
+  }
+
+  public async markPullRequestReady(pullRequestId: number) {
+    if (!this.repository) {
+      this.logStore.error("pull-requests", "Ready-for-review requested without an active repository.");
+      return {
+        ok: false,
+        message: "No Git repository is available."
+      };
+    }
+
+    try {
+      const session = await this.getGitHubSession();
+      if (!session) {
+        this.logStore.error("pull-requests", "Ready-for-review requested without GitHub auth session.");
+        return {
+          ok: false,
+          message: "GitHub authentication is required."
+        };
+      }
+
+      const targetRepository = await this.resolveGitHubRepository(this.repository);
+      if (!targetRepository) {
+        this.logStore.error(
+          "pull-requests",
+          "Ready-for-review requested but origin remote is not a supported GitHub URL."
+        );
+        return {
+          ok: false,
+          message: "Could not determine GitHub repository from origin remote."
+        };
+      }
+
+      this.logStore.info(
+        "pull-requests",
+        `PATCH /repos/${targetRepository.owner}/${targetRepository.name}/pulls/${pullRequestId} (draft=false)`
+      );
+      const response = await fetch(
+        `${GITHUB_API_URL}/repos/${targetRepository.owner}/${targetRepository.name}/pulls/${pullRequestId}`,
+        {
+          method: "PATCH",
+          headers: this.getGitHubHeaders(session.accessToken),
+          body: JSON.stringify({ draft: false })
+        }
+      );
+
+      if (!response.ok) {
+        const fallbackMessage = `GitHub returned ${response.status}.`;
+        const message = await this.readErrorMessage(response, fallbackMessage);
+        this.logStore.error(
+          "pull-requests",
+          `Ready-for-review failed for PR #${pullRequestId}: ${message}`
+        );
+        return {
+          ok: false,
+          message
+        };
+      }
+
+      this.logStore.info("pull-requests", `PR #${pullRequestId} is now ready for review.`);
+      return {
+        ok: true,
+        message: `Marked PR #${pullRequestId} as ready for review.`
+      };
+    } catch {
+      this.logStore.error(
+        "pull-requests",
+        `Unexpected ready-for-review failure for PR #${pullRequestId}.`
+      );
+      return {
+        ok: false,
+        message: "Failed to mark pull request as ready for review."
       };
     }
   }
@@ -298,12 +372,9 @@ class PullRequestsProvider {
   private async fetchOpenPullRequests(repository: GitHubRepository, accessToken: string) {
     const endpoint = `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/pulls?state=open&sort=updated&direction=desc&per_page=${MAX_VISIBLE_PULL_REQUESTS}`;
     this.logStore.info("github-api", `GET ${endpoint}`);
-    const response = await fetch(
-      endpoint,
-      {
-        headers: this.getGitHubHeaders(accessToken)
-      }
-    );
+    const response = await fetch(endpoint, {
+      headers: this.getGitHubHeaders(accessToken)
+    });
     this.logStore.info("github-api", `Response ${response.status} for open pull requests list.`);
 
     if (!response.ok) {
@@ -314,6 +385,30 @@ class PullRequestsProvider {
 
     const payload = (await response.json()) as GitHubPullRequestListItem[];
     return payload;
+  }
+
+  private async fetchViewerLogin(accessToken: string) {
+    const endpoint = `${GITHUB_API_URL}/user`;
+    this.logStore.info("github-api", `GET ${endpoint}`);
+    try {
+      const response = await fetch(endpoint, {
+        headers: this.getGitHubHeaders(accessToken)
+      });
+      this.logStore.info("github-api", `Response ${response.status} for viewer profile.`);
+      if (!response.ok) {
+        const message = await this.readErrorMessage(response, `GitHub returned ${response.status}.`);
+        this.logStore.warn("github-api", `Could not fetch authenticated user: ${message}`);
+        return undefined;
+      }
+      const payload = (await response.json()) as { login?: string };
+      if (typeof payload.login !== "string") {
+        return undefined;
+      }
+      return payload.login;
+    } catch {
+      this.logStore.warn("github-api", "Failed to fetch authenticated user profile.");
+      return undefined;
+    }
   }
 
   private async fetchMergeabilityDetails(
@@ -328,12 +423,9 @@ class PullRequestsProvider {
         try {
           const endpoint = `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/pulls/${pullRequestId}`;
           this.logStore.info("github-api", `GET ${endpoint}`);
-          const response = await fetch(
-            endpoint,
-            {
-              headers: this.getGitHubHeaders(accessToken)
-            }
-          );
+          const response = await fetch(endpoint, {
+            headers: this.getGitHubHeaders(accessToken)
+          });
           this.logStore.info("github-api", `Response ${response.status} for PR #${pullRequestId} detail.`);
           if (!response.ok) {
             const message = await this.readErrorMessage(
@@ -350,7 +442,6 @@ class PullRequestsProvider {
           });
         } catch {
           this.logStore.warn("github-api", `Failed to fetch details for PR #${pullRequestId}.`);
-          return;
         }
       })
     );
@@ -362,7 +453,7 @@ class PullRequestsProvider {
     return {
       Authorization: `Bearer ${accessToken}`,
       Accept: "application/vnd.github+json",
-      "User-Agent": "cursor-branch-switcher"
+      "User-Agent": "rd-git"
     };
   }
 
@@ -400,4 +491,4 @@ class PullRequestsProvider {
 }
 
 export { PullRequestsProvider };
-export type { PullRequestSummary, GitHubAuthStatus };
+export type { GitHubAuthStatus, PullRequestSummary };

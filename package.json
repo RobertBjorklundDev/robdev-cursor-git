@@ -1,5 +1,5 @@
 {
-  "name": "cursor-branch-switcher",
+  "name": "rd-git",
   "repository": {
     "type": "git",
     "url": ""
@@ -7,7 +7,7 @@
   "license": "MIT",
   "displayName": "RobDev Git",
   "description": "Show top 5 recently used local branches and switch with one click.",
-  "version": "0.0.22",
+  "version": "0.0.44",
   "publisher": "local",
   "engines": {
     "vscode": "^1.85.0"
@@ -18,7 +18,7 @@
   "activationEvents": [
     "onStartupFinished"
   ],
-  "main": "./dist/extension.js",
+  "main": "./dist/extension/app/extension/activate.js",
   "extensionDependencies": [
     "vscode.github-authentication"
   ],
@@ -26,64 +26,88 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "branchSwitcher",
+          "id": "rd-git",
           "title": "RobDev Git",
           "icon": "resources/icon.svg"
         }
       ]
     },
     "views": {
-      "branchSwitcher": [
+      "rd-git": [
         {
-          "id": "recentBranchesView",
+          "id": "rd-git.view",
           "name": "Recent Branches",
           "type": "webview"
         }
       ]
     },
+    "configuration": {
+      "title": "RDgit",
+      "properties": {
+        "rd-git.gitCommands.switchBranch": {
+          "type": "string",
+          "default": "git checkout {{targetBranch}}",
+          "markdownDescription": "Terminal command template used by **Switch Branch**. Supports placeholder: `{{targetBranch}}`."
+        },
+        "rd-git.gitCommands.pullFromOrigin": {
+          "type": "string",
+          "default": "git pull",
+          "markdownDescription": "Terminal command template used by **Pull From Origin**. Supports placeholder: `{{targetBranch}}`."
+        },
+        "rd-git.gitCommands.mergeFromBase": {
+          "type": "string",
+          "default": "git merge {{baseBranch}}",
+          "markdownDescription": "Terminal command template used by **Merge From Base**. Supports placeholders: `{{baseBranch}}`, `{{targetBranch}}`."
+        }
+      }
+    },
     "commands": [
       {
-        "command": "branchSwitcher.switchBranch",
+        "command": "rd-git.switchBranch",
         "title": "Switch Branch"
       },
       {
-        "command": "branchSwitcher.mergeFromBase",
+        "command": "rd-git.mergeFromBase",
         "title": "Merge Base Into Branch"
       },
       {
-        "command": "branchSwitcher.signInGithub",
+        "command": "rd-git.signInGithub",
         "title": "Sign In to GitHub"
       },
       {
-        "command": "branchSwitcher.switchGithubAccount",
+        "command": "rd-git.switchGithubAccount",
         "title": "Switch GitHub Account"
       },
       {
-        "command": "branchSwitcher.openGithubAccounts",
+        "command": "rd-git.openGithubAccounts",
         "title": "Open GitHub Accounts"
       }
     ],
     "menus": {
       "view/item/context": [
         {
-          "command": "branchSwitcher.mergeFromBase",
-          "when": "view == recentBranchesView && viewItem == branchSwitcher.branchItem",
+          "command": "rd-git.mergeFromBase",
+          "when": "view == rd-git.view && viewItem == rd-git.branchItem",
           "group": "inline"
         }
       ]
     }
   },
   "scripts": {
-    "build": "npm run build:webview && tsc -p .",
+    "build": "npm run typecheck:webview && npm run build:webview && tsc -p .",
     "build:webview": "npm run build:webview:js && npm run build:webview:css",
-    "build:webview:js": "esbuild webview/main.tsx --bundle --platform=browser --format=iife --target=es2020 --outfile=media/webview.js",
-    "build:webview:css": "tailwindcss -i webview/styles.css -o media/webview.css --minify",
+    "build:webview:js": "esbuild src/app/webview/main.tsx --bundle --platform=browser --format=iife --target=es2020 --outfile=dist/media/webview.js",
+    "build:webview:css": "tailwindcss -i src/app/webview/styles.css -o dist/media/webview.css --minify",
+    "typecheck:webview": "tsc -p tsconfig.webview.json --noEmit",
     "watch": "tsc -w -p .",
-    "package": "node scripts/package.js"
+    "package": "node scripts/package.js",
+    "dev:local": "node scripts/local-dev.js"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.2.1",
     "@types/node": "^25.3.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@types/vscode": "^1.85.0",
     "esbuild": "^0.27.3",
     "tailwindcss": "^4.2.1",
@@ -94,5 +118,6 @@
     "lucide-react": "^0.575.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
-  }
+  },
+  "robdevBuildCode": "00562ead-0395-40d2-8ae6-e0873ad96669"
 }
