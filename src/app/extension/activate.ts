@@ -6,10 +6,17 @@ import { RecentBranchesProvider } from "../../features/branches/extension";
 import { RecentBranchesWebviewProvider } from "../../features/webview/extension";
 import { PullRequestsProvider } from "../../features/pull-requests/extension";
 import type { GitAPI, GitExtensionExports, Repository } from "../../shared/extension";
+import { GitTerminalExecutor, type TerminalDispatchResult } from "./GitTerminalExecutor";
 
 interface ExtensionPackageJson {
   version?: unknown;
   robdevBuildCode?: unknown;
+}
+
+interface GitCommandTemplates {
+  switchBranch: string;
+  pullFromOrigin: string;
+  mergeFromBase: string;
 }
 
 type ExecFileAsync = (
@@ -17,6 +24,12 @@ type ExecFileAsync = (
   args: string[],
   options: { cwd: string }
 ) => Promise<{ stdout: string; stderr: string }>;
+
+const DEFAULT_GIT_COMMAND_TEMPLATES: GitCommandTemplates = {
+  switchBranch: "git checkout {{targetBranch}}",
+  pullFromOrigin: "git pull",
+  mergeFromBase: "git merge {{baseBranch}}"
+};
 
 async function activate(context: vscode.ExtensionContext) {
   const execFileAsync = promisify(execFile) as unknown as ExecFileAsync;
@@ -42,13 +55,52 @@ async function activate(context: vscode.ExtensionContext) {
     extensionVersion,
     extensionBuildCode
   );
-  const webviewDisposable = vscode.window.registerWebviewViewProvider("recentBranchesView", webviewProvider, {
+  const webviewDisposable = vscode.window.registerWebviewViewProvider("rd-git.view", webviewProvider, {
     webviewOptions: {
       retainContextWhenHidden: true
     }
   });
   context.subscriptions.push(webviewDisposable);
   context.subscriptions.push(webviewProvider);
+  const gitTerminalExecutor = new GitTerminalExecutor();
+  context.subscriptions.push(gitTerminalExecutor);
+
+  function setGitOperationInProgress(action: "pullFromOrigin" | "mergeFromBase", notice: string) {
+    webviewProvider.setGitOperationState({
+      isInProgress: true,
+      action,
+      terminalName: gitTerminalExecutor.getTerminalName(),
+      notice
+    });
+  }
+
+  function setGitOperationIdle(notice: string) {
+    webviewProvider.setGitOperationState({
+      isInProgress: false,
+      action: undefined,
+      terminalName: gitTerminalExecutor.getTerminalName(),
+      notice
+    });
+  }
+
+  function logTerminalDispatchResult(actionLabel: string, command: string, result: TerminalDispatchResult) {
+    if (result.ok) {
+      const lifecycleLabel = result.lifecycle === "created" ? "created" : "reused";
+      logStore.info(
+        "commands",
+        `${actionLabel}: terminal '${result.terminalName}' ${lifecycleLabel}; command dispatched.`
+      );
+      logStore.info("git", `$ ${command}`);
+      return;
+    }
+
+    const failedStep = result.failedStep ?? "unknown";
+    const details = result.errorMessage ?? "Unknown terminal dispatch error.";
+    logStore.error(
+      "commands",
+      `${actionLabel}: terminal dispatch failed at '${failedStep}' for '${result.terminalName}'. ${details}`
+    );
+  }
 
   const repositorySubscriptions = new Map<string, vscode.Disposable>();
 
@@ -131,7 +183,7 @@ async function activate(context: vscode.ExtensionContext) {
   });
 
   const switchBranchDisposable = vscode.commands.registerCommand(
-    "branchSwitcher.switchBranch",
+    "rd-git.switchBranch",
     async (branchName: string) => {
       const repository = getCurrentRepository();
       if (!repository) {
@@ -140,10 +192,30 @@ async function activate(context: vscode.ExtensionContext) {
       }
 
       try {
-        logStore.info("commands", `Switching branch to '${branchName}'.`);
-        await repository.checkout(branchName);
-        await updateCurrentBranchMru(repository);
-        logStore.info("commands", `Switched branch to '${branchName}'.`);
+        const targetBranch = normalizeBranchName(branchName);
+        if (!targetBranch) {
+          logStore.warn("commands", "Could not determine target branch for switch.");
+          return;
+        }
+
+        if (!isShellSafeGitRef(targetBranch)) {
+          throw new Error(
+            `Branch '${targetBranch}' has unsupported characters for terminal dispatch. Run switch manually in terminal.`
+          );
+        }
+
+        const templates = getGitCommandTemplates();
+        const command = renderGitCommandTemplate(
+          templates.switchBranch,
+          {
+            targetBranch
+          },
+          DEFAULT_GIT_COMMAND_TEMPLATES.switchBranch,
+          "switchBranch",
+          logStore
+        );
+        const dispatchResult = gitTerminalExecutor.runCommand(repository.rootUri.fsPath, command);
+        logTerminalDispatchResult(`Switch to '${targetBranch}'`, command, dispatchResult);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
         logStore.error("commands", `Failed to switch branch: ${message}`);
@@ -152,7 +224,7 @@ async function activate(context: vscode.ExtensionContext) {
   );
 
   const pullFromOriginDisposable = vscode.commands.registerCommand(
-    "branchSwitcher.pullFromOrigin",
+    "rd-git.pullFromOrigin",
     async (branchArg: string | { branchName?: string }) => {
       const repository = getCurrentRepository();
       if (!repository) {
@@ -160,32 +232,77 @@ async function activate(context: vscode.ExtensionContext) {
         return;
       }
 
+      let hasStarted = false;
       try {
         const targetBranch = normalizeBranchName(getBranchName(branchArg));
         if (!targetBranch) {
           logStore.warn("commands", "Could not determine target branch for pull from origin.");
           return;
         }
-        const currentBranch = normalizeBranchName(repository.state.HEAD?.name ?? "");
 
+        setGitOperationInProgress(
+          "pullFromOrigin",
+          `Starting pull for '${targetBranch}' in terminal '${gitTerminalExecutor.getTerminalName()}'.`
+        );
+
+        const currentBranch = normalizeBranchName(repository.state.HEAD?.name ?? "");
+        const templates = getGitCommandTemplates();
+        const switchCommand = renderGitCommandTemplate(
+          templates.switchBranch,
+          {
+            targetBranch
+          },
+          DEFAULT_GIT_COMMAND_TEMPLATES.switchBranch,
+          "switchBranch",
+          logStore
+        );
+        const pullCommand = renderGitCommandTemplate(
+          templates.pullFromOrigin,
+          {
+            targetBranch
+          },
+          DEFAULT_GIT_COMMAND_TEMPLATES.pullFromOrigin,
+          "pullFromOrigin",
+          logStore
+        );
+
+        let commandToRun = pullCommand;
         if (currentBranch !== targetBranch) {
-          logStore.info("commands", `Checking out '${targetBranch}' before pull.`);
-          await repository.checkout(targetBranch);
-          await updateCurrentBranchMru(repository);
+          commandToRun = `${switchCommand} && ${pullCommand}`;
+          logStore.info("commands", `Will switch to '${targetBranch}' before pull.`);
         }
 
-        await runGit(repository, execFileAsync, ["pull", "origin", targetBranch], logStore);
+        const dispatchResult = gitTerminalExecutor.runCommand(repository.rootUri.fsPath, commandToRun);
+        if (!dispatchResult.ok) {
+          logTerminalDispatchResult(`Pull '${targetBranch}'`, commandToRun, dispatchResult);
+          return;
+        }
+        hasStarted = true;
+        logTerminalDispatchResult(`Pull '${targetBranch}'`, commandToRun, dispatchResult);
         await updateCurrentBranchMru(repository);
-        logStore.info("commands", `Pulled latest changes from origin/${targetBranch}.`);
+        logStore.info(
+          "commands",
+          "Watch terminal output for merge conflicts, auth prompts, and completion status."
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
         logStore.error("commands", `Pull from origin failed: ${message}`);
+        logStore.warn(
+          "commands",
+          `If a command was started, continue in terminal '${gitTerminalExecutor.getTerminalName()}' and use Logs tab for history.`
+        );
+      } finally {
+        if (hasStarted) {
+          setGitOperationIdle(
+            `Pull command sent to '${gitTerminalExecutor.getTerminalName()}'. Watch terminal output for prompts/conflicts; Logs tab keeps history.`
+          );
+        }
       }
     }
   );
 
   const mergeFromBaseDisposable = vscode.commands.registerCommand(
-    "branchSwitcher.mergeFromBase",
+    "rd-git.mergeFromBase",
     async (branchArg: string | { branchName?: string }) => {
       const repository = getCurrentRepository();
       if (!repository) {
@@ -193,33 +310,93 @@ async function activate(context: vscode.ExtensionContext) {
         return;
       }
 
+      let hasStarted = false;
       try {
         const targetBranch = normalizeBranchName(getBranchName(branchArg));
         if (!targetBranch) {
           logStore.warn("commands", "Could not determine target branch for merge from base.");
           return;
         }
+
+        setGitOperationInProgress(
+          "mergeFromBase",
+          `Starting merge in terminal '${gitTerminalExecutor.getTerminalName()}'.`
+        );
+
         const baseBranch = await resolveBaseBranch(repository, execFileAsync, logStore);
         const currentBranch = normalizeBranchName(repository.state.HEAD?.name ?? "");
+        const templates = getGitCommandTemplates();
+        const switchCommand = renderGitCommandTemplate(
+          templates.switchBranch,
+          {
+            targetBranch
+          },
+          DEFAULT_GIT_COMMAND_TEMPLATES.switchBranch,
+          "switchBranch",
+          logStore
+        );
+        const mergeCommand = renderGitCommandTemplate(
+          templates.mergeFromBase,
+          {
+            targetBranch,
+            baseBranch
+          },
+          DEFAULT_GIT_COMMAND_TEMPLATES.mergeFromBase,
+          "mergeFromBase",
+          logStore
+        );
 
-        if (currentBranch !== targetBranch) {
-          logStore.info("commands", `Checking out '${targetBranch}' before merge.`);
-          await repository.checkout(targetBranch);
-          await updateCurrentBranchMru(repository);
+        if (!isShellSafeGitRef(baseBranch) || !isShellSafeGitRef(targetBranch)) {
+          throw new Error(
+            `Base branch '${baseBranch}' has unsupported characters for terminal dispatch. Run merge manually in terminal.`
+          );
         }
 
-        await runGit(repository, execFileAsync, ["merge", baseBranch], logStore);
+        let commandToRun = mergeCommand;
+        if (currentBranch !== targetBranch) {
+          commandToRun = `${switchCommand} && ${mergeCommand}`;
+          logStore.info("commands", `Will switch to '${targetBranch}' before merge.`);
+        }
+
+        const dispatchResult = gitTerminalExecutor.runCommand(repository.rootUri.fsPath, commandToRun);
+        if (!dispatchResult.ok) {
+          logTerminalDispatchResult(
+            `Merge '${baseBranch}' into '${targetBranch}'`,
+            commandToRun,
+            dispatchResult
+          );
+          return;
+        }
+        hasStarted = true;
+        logTerminalDispatchResult(
+          `Merge '${baseBranch}' into '${targetBranch}'`,
+          commandToRun,
+          dispatchResult
+        );
         await updateCurrentBranchMru(repository);
-        logStore.info("commands", `Merged '${baseBranch}' into '${targetBranch}'.`);
+        logStore.info(
+          "commands",
+          "Resolve merge conflicts in the terminal. After resolving, run git add + git merge --continue (or git merge --abort)."
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
         logStore.error("commands", `Merge failed: ${message}`);
+        logStore.warn(
+          "commands",
+          `If a command was started, continue in terminal '${gitTerminalExecutor.getTerminalName()}' and use Logs tab for history.`
+        );
+      } finally {
+        if (hasStarted) {
+          setGitOperationIdle(
+            `Merge command sent to '${gitTerminalExecutor.getTerminalName()}'. Resolve prompts/conflicts there, then refresh. Logs tab keeps history.`
+          );
+        }
       }
     }
   );
 
   const mergePullRequestDisposable = vscode.commands.registerCommand(
-    "branchSwitcher.mergePullRequest",
+    "rd-git.mergePullRequest",
     async (pullRequestId: number) => {
       const result = await pullRequestsProvider.mergePullRequest(pullRequestId);
       if (result.ok) {
@@ -232,7 +409,7 @@ async function activate(context: vscode.ExtensionContext) {
   );
 
   const markPullRequestReadyDisposable = vscode.commands.registerCommand(
-    "branchSwitcher.markPullRequestReady",
+    "rd-git.markPullRequestReady",
     async (pullRequestId: number) => {
       const result = await pullRequestsProvider.markPullRequestReady(pullRequestId);
       if (result.ok) {
@@ -244,7 +421,7 @@ async function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  const signInGithubDisposable = vscode.commands.registerCommand("branchSwitcher.signInGithub", async () => {
+  const signInGithubDisposable = vscode.commands.registerCommand("rd-git.signInGithub", async () => {
     const didSignIn = await pullRequestsProvider.signIn();
     if (!didSignIn) {
       logStore.warn("auth", "GitHub sign-in was canceled or unavailable.");
@@ -253,7 +430,7 @@ async function activate(context: vscode.ExtensionContext) {
   });
 
   const switchGithubAccountDisposable = vscode.commands.registerCommand(
-    "branchSwitcher.switchGithubAccount",
+    "rd-git.switchGithubAccount",
     async () => {
       const didSwitch = await pullRequestsProvider.switchAccount();
       if (!didSwitch) {
@@ -264,7 +441,7 @@ async function activate(context: vscode.ExtensionContext) {
   );
 
   const openGithubAccountsDisposable = vscode.commands.registerCommand(
-    "branchSwitcher.openGithubAccounts",
+    "rd-git.openGithubAccounts",
     async () => {
       await pullRequestsProvider.openGitHubAccountsMenu();
       pullRequestsProvider.refresh();
@@ -305,6 +482,58 @@ function getBranchName(branchArg: string | { branchName?: string }) {
   }
 
   return branchArg.branchName ?? "";
+}
+
+function isShellSafeGitRef(value: string) {
+  return /^[A-Za-z0-9._/-]+$/.test(value);
+}
+
+function getGitCommandTemplates(): GitCommandTemplates {
+  const configuration = vscode.workspace.getConfiguration("rd-git");
+  return {
+    switchBranch: configuration.get<string>(
+      "gitCommands.switchBranch",
+      DEFAULT_GIT_COMMAND_TEMPLATES.switchBranch
+    ),
+    pullFromOrigin: configuration.get<string>(
+      "gitCommands.pullFromOrigin",
+      DEFAULT_GIT_COMMAND_TEMPLATES.pullFromOrigin
+    ),
+    mergeFromBase: configuration.get<string>(
+      "gitCommands.mergeFromBase",
+      DEFAULT_GIT_COMMAND_TEMPLATES.mergeFromBase
+    )
+  };
+}
+
+function renderGitCommandTemplate(
+  template: string,
+  values: Record<string, string>,
+  fallbackTemplate: string,
+  templateKey: keyof GitCommandTemplates,
+  logStore: LogStore
+) {
+  const normalizedTemplate = template.trim();
+  if (!normalizedTemplate) {
+    logStore.warn("commands", `Setting rd-git.gitCommands.${templateKey} is empty. Using default template.`);
+    return renderGitCommandTemplate(fallbackTemplate, values, fallbackTemplate, templateKey, logStore);
+  }
+
+  let command = normalizedTemplate;
+  for (const [name, value] of Object.entries(values)) {
+    command = command.split(`{{${name}}}`).join(value);
+  }
+
+  const normalizedCommand = command.trim();
+  if (!normalizedCommand) {
+    logStore.warn(
+      "commands",
+      `Setting rd-git.gitCommands.${templateKey} resolved to an empty command. Using default template.`
+    );
+    return renderGitCommandTemplate(fallbackTemplate, values, fallbackTemplate, templateKey, logStore);
+  }
+
+  return normalizedCommand;
 }
 
 async function resolveBaseBranch(

@@ -27,9 +27,17 @@ function getCursorCommand() {
   return "cursor";
 }
 
+function buildVsixFileName(packageJson) {
+  if (typeof packageJson.publisher !== "string" || packageJson.publisher.length === 0) {
+    return `${packageJson.name}-${packageJson.version}.vsix`;
+  }
+
+  return `${packageJson.publisher}.${packageJson.name}-${packageJson.version}.vsix`;
+}
+
 function buildVsixPath() {
   const packageJson = readJsonFile(packageJsonPath);
-  const outputFile = `${packageJson.name}-${packageJson.version}.vsix`;
+  const outputFile = buildVsixFileName(packageJson);
   return path.join(outputDir, outputFile);
 }
 

@@ -453,7 +453,7 @@ class PullRequestsProvider {
     return {
       Authorization: `Bearer ${accessToken}`,
       Accept: "application/vnd.github+json",
-      "User-Agent": "cursor-branch-switcher"
+      "User-Agent": "rd-git"
     };
   }
 

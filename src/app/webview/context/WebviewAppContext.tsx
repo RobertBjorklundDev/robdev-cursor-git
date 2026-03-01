@@ -2,8 +2,10 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from "
 import type {
   ActiveTab,
   ExtensionToWebviewMessage,
+  GitOperationState,
   GitHubAuthStatus,
   LogEntry,
+  LogLevel,
   PersistedAppState,
   PullRequestFilter,
   PullRequestSummary,
@@ -22,17 +24,21 @@ interface WebviewAppStateContextValue {
   pullRequests: PullRequestSummary[];
   logs: LogEntry[];
   isLogAutoScrollEnabled: boolean;
+  activeLogLevels: LogLevel[];
   activeTab: ActiveTab;
   pullRequestFilter: PullRequestFilter;
   baseBranchName: string;
   isLoading: boolean;
   authStatus: GitHubAuthStatus;
+  gitOperationState: GitOperationState;
   setIsLogAutoScrollEnabled(value: boolean): void;
+  setActiveLogLevels(value: LogLevel[]): void;
   setActiveTab(value: ActiveTab): void;
   setPullRequestFilter(value: PullRequestFilter): void;
   postSwitchBranch(branchName: string): void;
   postMergeFromBase(branchName: string): void;
   postPullFromOrigin(branchName: string): void;
+  postClearLogs(): void;
   postRequestRefresh(): void;
   postOpenPullRequest(url: string): void;
   postMergePullRequest(pullRequestId: number): void;
@@ -48,11 +54,22 @@ interface WebviewAppProviderProps {
 
 const WebviewAppContext = createContext<WebviewAppStateContextValue | undefined>(undefined);
 
+function normalizeLogLevels(levels: LogLevel[]) {
+  const orderedLevels: LogLevel[] = ["info", "warn", "error"];
+  const includedLevels = new Set<LogLevel>();
+  for (const level of levels) {
+    if (level === "info" || level === "warn" || level === "error") {
+      includedLevels.add(level);
+    }
+  }
+  return orderedLevels.filter((level) => includedLevels.has(level));
+}
+
 function getWebviewAssets(): WebviewAssets {
-  const windowWithData = window as Window & { __BRANCH_SWITCHER_ASSETS__?: WebviewAssets };
+  const windowWithData = window as Window & { __RD_GIT_ASSETS__?: WebviewAssets };
   return {
-    extensionVersion: windowWithData.__BRANCH_SWITCHER_ASSETS__?.extensionVersion ?? "unknown",
-    extensionBuildCode: windowWithData.__BRANCH_SWITCHER_ASSETS__?.extensionBuildCode ?? "dev"
+    extensionVersion: windowWithData.__RD_GIT_ASSETS__?.extensionVersion ?? "unknown",
+    extensionBuildCode: windowWithData.__RD_GIT_ASSETS__?.extensionBuildCode ?? "dev"
   };
 }
 
@@ -68,6 +85,13 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
   const [isLogAutoScrollEnabled, setIsLogAutoScrollEnabled] = useState(
     () => restoredState.isLogAutoScrollEnabled ?? true
   );
+  const [activeLogLevelsState, setActiveLogLevelsState] = useState<LogLevel[]>(() => {
+    const restoredLevels = normalizeLogLevels(restoredState.activeLogLevels ?? []);
+    if (restoredLevels.length === 0) {
+      return ["info", "warn", "error"];
+    }
+    return restoredLevels;
+  });
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => restoredState.activeTab ?? "main");
   const [pullRequestFilter, setPullRequestFilter] = useState<PullRequestFilter>(
     () => restoredState.pullRequestFilter ?? "ready"
@@ -78,6 +102,12 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
     isProviderAvailable: restoredState.authStatus?.isProviderAvailable ?? true,
     isAuthenticated: restoredState.authStatus?.isAuthenticated ?? false
   });
+  const [gitOperationState, setGitOperationState] = useState<GitOperationState>({
+    isInProgress: false,
+    action: undefined,
+    terminalName: undefined,
+    notice: undefined
+  });
 
   useEffect(() => {
     const nextState: PersistedAppState = {
@@ -85,6 +115,7 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
       pullRequests,
       logs,
       isLogAutoScrollEnabled,
+      activeLogLevels: activeLogLevelsState,
       activeTab,
       pullRequestFilter,
       baseBranchName,
@@ -99,6 +130,7 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
     branches,
     isLoading,
     isLogAutoScrollEnabled,
+    activeLogLevelsState,
     logs,
     pullRequestFilter,
     pullRequests,
@@ -127,6 +159,10 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
       }
       if (message.type === "setAuthStatus") {
         setAuthStatus(message.authStatus);
+        return;
+      }
+      if (message.type === "setGitOperationState") {
+        setGitOperationState(message.gitOperationState);
         return;
       }
       if (message.type === "setLogs") {
@@ -161,6 +197,23 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
     vscode.postMessage({ type: "requestRefresh" });
   }
 
+  function postClearLogs() {
+    setLogs([]);
+    vscode.postMessage({ type: "clearLogs" });
+  }
+
+  function setActiveLogLevels(levels: LogLevel[]) {
+    const normalizedLevels = normalizeLogLevels(levels);
+    if (normalizedLevels.length === 0) {
+      return;
+    }
+    setActiveLogLevelsState(normalizedLevels);
+    vscode.postMessage({
+      type: "setLogLevelFilters",
+      logLevels: normalizedLevels
+    });
+  }
+
   function postOpenPullRequest(url: string) {
     vscode.postMessage({ type: "openPullRequest", pullRequestUrl: url });
   }
@@ -191,17 +244,21 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
     pullRequests,
     logs,
     isLogAutoScrollEnabled,
+    activeLogLevels: activeLogLevelsState,
     activeTab,
     pullRequestFilter,
     baseBranchName,
     isLoading,
     authStatus,
+    gitOperationState,
     setIsLogAutoScrollEnabled,
+    setActiveLogLevels,
     setActiveTab,
     setPullRequestFilter,
     postSwitchBranch,
     postMergeFromBase,
     postPullFromOrigin,
+    postClearLogs,
     postRequestRefresh,
     postOpenPullRequest,
     postMergePullRequest,

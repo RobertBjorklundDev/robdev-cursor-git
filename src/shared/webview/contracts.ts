@@ -23,6 +23,15 @@ interface GitHubAuthStatus {
   isAuthenticated: boolean;
 }
 
+type GitOperationType = "pullFromOrigin" | "mergeFromBase" | undefined;
+
+interface GitOperationState {
+  isInProgress: boolean;
+  action: GitOperationType;
+  terminalName: string | undefined;
+  notice: string | undefined;
+}
+
 type LogLevel = "info" | "warn" | "error";
 
 interface LogEntry {
@@ -47,10 +56,13 @@ interface BranchActionMessage {
     | "markPullRequestReady"
     | "signInGithub"
     | "switchGithubAccount"
-    | "openGithubAccounts";
+    | "openGithubAccounts"
+    | "clearLogs"
+    | "setLogLevelFilters";
   branchName?: string;
   pullRequestId?: number;
   pullRequestUrl?: string;
+  logLevels?: LogLevel[];
 }
 
 interface WebviewSetBranchesMessage {
@@ -85,13 +97,19 @@ interface WebviewSetAuthStatusMessage {
   authStatus: GitHubAuthStatus;
 }
 
+interface WebviewSetGitOperationStateMessage {
+  type: "setGitOperationState";
+  gitOperationState: GitOperationState;
+}
+
 type ExtensionToWebviewMessage =
   | WebviewSetBranchesMessage
   | WebviewSetLoadingMessage
   | WebviewSetPullRequestsMessage
   | WebviewSetLogsMessage
   | WebviewAppendLogMessage
-  | WebviewSetAuthStatusMessage;
+  | WebviewSetAuthStatusMessage
+  | WebviewSetGitOperationStateMessage;
 
 interface WebviewAssets {
   extensionVersion: string;
@@ -103,6 +121,7 @@ interface PersistedAppState {
   pullRequests: PullRequestSummary[];
   logs: LogEntry[];
   isLogAutoScrollEnabled: boolean;
+  activeLogLevels: LogLevel[];
   activeTab: ActiveTab;
   pullRequestFilter: PullRequestFilter;
   baseBranchName: string;
@@ -121,6 +140,8 @@ export type {
   ActiveTab,
   BranchActionMessage,
   ExtensionToWebviewMessage,
+  GitOperationState,
+  GitOperationType,
   GitHubAuthStatus,
   LogEntry,
   LogLevel,
@@ -133,6 +154,7 @@ export type {
   WebviewAssets,
   WebviewSetAuthStatusMessage,
   WebviewSetBranchesMessage,
+  WebviewSetGitOperationStateMessage,
   WebviewSetLoadingMessage,
   WebviewSetLogsMessage,
   WebviewSetPullRequestsMessage

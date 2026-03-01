@@ -4,6 +4,7 @@ import type { RecentBranchesProvider } from "../../branches/extension";
 import type { PullRequestsProvider } from "../../pull-requests/extension";
 import type {
   BranchActionMessage,
+  GitOperationState,
   GitHubAuthStatus,
   LogEntry,
   PersistedWebviewState,
@@ -13,12 +14,13 @@ import type {
   WebviewAppendLogMessage,
   WebviewSetAuthStatusMessage,
   WebviewSetBranchesMessage,
+  WebviewSetGitOperationStateMessage,
   WebviewSetLoadingMessage,
   WebviewSetLogsMessage,
   WebviewSetPullRequestsMessage,
 } from "../../../shared/webview/contracts";
 
-const PERSISTED_WEBVIEW_STATE_KEY = "branchSwitcher.webviewState";
+const PERSISTED_WEBVIEW_STATE_KEY = "rd-git.webviewState";
 const VISIBLE_REFRESH_INTERVAL_MS = 60_000;
 const VISIBILITY_REFRESH_COOLDOWN_MS = 10_000;
 
@@ -39,6 +41,12 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     isAuthenticated: false,
   };
   private lastBaseBranchName = "main";
+  private lastGitOperationState: GitOperationState = {
+    isInProgress: false,
+    action: undefined,
+    terminalName: undefined,
+    notice: undefined
+  };
   private isLoading = false;
   private hasInitializedHtml = false;
   private visibleRefreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -103,6 +111,11 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     this.handleVisibilityChanged();
   }
 
+  public setGitOperationState(gitOperationState: GitOperationState) {
+    this.lastGitOperationState = gitOperationState;
+    this.postGitOperationState(gitOperationState);
+  }
+
   private handleVisibilityChanged() {
     if (!this.view) {
       this.stopVisibleRefreshTimer();
@@ -160,6 +173,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       this.postPullRequestsUpdate(this.lastPullRequests);
       this.postAuthStatus(this.lastAuthStatus);
       this.postLogs(this.logStore.getEntries());
+      this.postGitOperationState(this.lastGitOperationState);
     } else {
       this.postLoading(this.isLoading);
     }
@@ -181,6 +195,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       this.postBranchesUpdate(branches, baseBranchName, this.isLoading);
       this.postPullRequestsUpdate(pullRequests);
       this.postAuthStatus(authStatus);
+      this.postGitOperationState(this.lastGitOperationState);
     } catch {
       this.isLoading = false;
       this.postBranchesUpdate(
@@ -190,6 +205,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       );
       this.postPullRequestsUpdate(this.lastPullRequests);
       this.postAuthStatus(this.lastAuthStatus);
+      this.postGitOperationState(this.lastGitOperationState);
     }
   }
 
@@ -265,6 +281,17 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     this.view.webview.postMessage(message);
   }
 
+  private postGitOperationState(gitOperationState: GitOperationState) {
+    if (!this.view) {
+      return;
+    }
+    const message: WebviewSetGitOperationStateMessage = {
+      type: "setGitOperationState",
+      gitOperationState
+    };
+    this.view.webview.postMessage(message);
+  }
+
   private async handleMessage(message: BranchActionMessage) {
     if (message.type === "requestRefresh") {
       void this.render();
@@ -280,23 +307,37 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       this.postPullRequestsUpdate(this.lastPullRequests);
       this.postAuthStatus(this.lastAuthStatus);
       this.postLogs(this.logStore.getEntries());
+      this.postGitOperationState(this.lastGitOperationState);
+      return;
+    }
+
+    if (message.type === "clearLogs") {
+      this.logStore.clear();
+      this.postLogs(this.logStore.getEntries());
+      return;
+    }
+
+    if (message.type === "setLogLevelFilters") {
+      if (!isValidLogLevels(message.logLevels)) {
+        return;
+      }
       return;
     }
 
     if (message.type === "signInGithub") {
-      await vscode.commands.executeCommand("branchSwitcher.signInGithub");
+      await vscode.commands.executeCommand("rd-git.signInGithub");
       return;
     }
 
     if (message.type === "switchGithubAccount") {
       await vscode.commands.executeCommand(
-        "branchSwitcher.switchGithubAccount",
+        "rd-git.switchGithubAccount",
       );
       return;
     }
 
     if (message.type === "openGithubAccounts") {
-      await vscode.commands.executeCommand("branchSwitcher.openGithubAccounts");
+      await vscode.commands.executeCommand("rd-git.openGithubAccounts");
       return;
     }
 
@@ -314,7 +355,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
         return;
       }
       await vscode.commands.executeCommand(
-        "branchSwitcher.mergePullRequest",
+        "rd-git.mergePullRequest",
         message.pullRequestId,
       );
       return;
@@ -325,7 +366,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
         return;
       }
       await vscode.commands.executeCommand(
-        "branchSwitcher.markPullRequestReady",
+        "rd-git.markPullRequestReady",
         message.pullRequestId,
       );
       return;
@@ -337,7 +378,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
 
     if (message.type === "switchBranch") {
       await vscode.commands.executeCommand(
-        "branchSwitcher.switchBranch",
+        "rd-git.switchBranch",
         message.branchName,
       );
       return;
@@ -345,7 +386,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
 
     if (message.type === "mergeFromBase") {
       await vscode.commands.executeCommand(
-        "branchSwitcher.mergeFromBase",
+        "rd-git.mergeFromBase",
         message.branchName,
       );
       return;
@@ -353,7 +394,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
 
     if (message.type === "pullFromOrigin") {
       await vscode.commands.executeCommand(
-        "branchSwitcher.pullFromOrigin",
+        "rd-git.pullFromOrigin",
         message.branchName,
       );
     }
@@ -389,7 +430,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
   <body>
     <div id="root"></div>
     <script nonce="${nonce}">
-      window.__BRANCH_SWITCHER_ASSETS__ = ${JSON.stringify(assets)};
+      window.__RD_GIT_ASSETS__ = ${JSON.stringify(assets)};
     </script>
     <script nonce="${nonce}" src="${scriptUri}"></script>
   </body>
@@ -446,6 +487,13 @@ function getNonce() {
     value += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return value;
+}
+
+function isValidLogLevels(value: unknown): value is Array<"info" | "warn" | "error"> {
+  if (!Array.isArray(value)) {
+    return false;
+  }
+  return value.every((level) => level === "info" || level === "warn" || level === "error");
 }
 
 export { RecentBranchesWebviewProvider };

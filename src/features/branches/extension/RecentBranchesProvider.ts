@@ -21,11 +21,11 @@ class BranchItem extends vscode.TreeItem {
     super(branchName, vscode.TreeItemCollapsibleState.None);
     this.branchName = branchName;
     this.command = {
-      command: "branchSwitcher.switchBranch",
+      command: "rd-git.switchBranch",
       title: "Switch Branch",
       arguments: [branchName]
     };
-    this.contextValue = "branchSwitcher.branchItem";
+    this.contextValue = "rd-git.branchItem";
     this.description = isCurrent ? `current • ${lastCommitDescription}` : lastCommitDescription;
   }
 }
@@ -130,7 +130,7 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
   }
 
   private getStorageKey(repoPath: string) {
-    return `branchSwitcher.mru.${repoPath}`;
+    return `rd-git.mru.${repoPath}`;
   }
 
   private getMruForCurrentRepo() {

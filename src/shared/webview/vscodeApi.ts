@@ -12,7 +12,7 @@ interface VsCodeApi {
 }
 
 interface WindowWithWebviewData extends Window {
-  __BRANCH_SWITCHER_ASSETS__?: WebviewAssets;
+  __RD_GIT_ASSETS__?: WebviewAssets;
   acquireVsCodeApi?: () => VsCodeApi;
 }
 
@@ -52,6 +52,14 @@ function restorePersistedAppState(vscode: VsCodeApi) {
     nextState.isLogAutoScrollEnabled = candidate.isLogAutoScrollEnabled;
   }
   if (
+    Array.isArray(candidate.activeLogLevels) &&
+    candidate.activeLogLevels.every(
+      (level) => level === "info" || level === "warn" || level === "error"
+    )
+  ) {
+    nextState.activeLogLevels = candidate.activeLogLevels;
+  }
+  if (
     candidate.activeTab === "main" ||
     candidate.activeTab === "logs" ||
     candidate.activeTab === "settings"
@@ -89,7 +97,8 @@ function isExtensionToWebviewMessage(message: unknown): message is ExtensionToWe
     typeValue === "setPullRequests" ||
     typeValue === "setAuthStatus" ||
     typeValue === "setLogs" ||
-    typeValue === "appendLog"
+    typeValue === "appendLog" ||
+    typeValue === "setGitOperationState"
   );
 }
 

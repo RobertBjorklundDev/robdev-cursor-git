@@ -25,6 +25,10 @@ class LogStore {
     this.append("error", category, message);
   }
 
+  public clear() {
+    this.entries.length = 0;
+  }
+
   private append(level: LogLevel, category: string, message: string) {
     const entry: LogEntry = {
       timestampIso: new Date().toISOString(),

@@ -28,6 +28,14 @@ function getNpmCommand() {
   return "npm";
 }
 
+function buildVsixFileName(packageJson) {
+  if (typeof packageJson.publisher !== "string" || packageJson.publisher.length === 0) {
+    return `${packageJson.name}-${packageJson.version}.vsix`;
+  }
+
+  return `${packageJson.publisher}.${packageJson.name}-${packageJson.version}.vsix`;
+}
+
 function bumpPatchVersion(version) {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
   if (!match) {
@@ -59,7 +67,7 @@ function run() {
   writePackageJson(packageJson);
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const outputFile = `${packageJson.name}-${packageJson.version}.vsix`;
+  const outputFile = buildVsixFileName(packageJson);
   const outputPath = path.join(outputDir, outputFile);
 
   execFileSync(getVsceCommand(), ["vsce", "package", "--out", outputPath], {

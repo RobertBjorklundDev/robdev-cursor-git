@@ -7,6 +7,7 @@ function BranchesPanel() {
   const {
     branches,
     baseBranchName,
+    gitOperationState,
     isLoading,
     postMergeFromBase,
     postPullFromOrigin,
@@ -26,6 +27,11 @@ function BranchesPanel() {
           ) : null}
         </div>
       </Card>
+      {gitOperationState.notice ? (
+        <Card className="w-full text-xs text-(--vscode-descriptionForeground)" padding="sm">
+          {gitOperationState.notice}
+        </Card>
+      ) : null}
 
       <div className="flex min-h-14 flex-col gap-2">
         {branches.length === 0 ? (
@@ -38,12 +44,17 @@ function BranchesPanel() {
               {branch.isCurrent ? (
                 <Button
                   className="w-8 self-stretch p-0"
+                  disabled={gitOperationState.isInProgress}
                   size="sm"
                   variant="secondary"
                   onClick={() => {
                     postPullFromOrigin(branch.name);
                   }}
-                  title={`Pull ${branch.name} from origin`}
+                  title={
+                    gitOperationState.isInProgress
+                      ? "Git action in progress. Check terminal."
+                      : `Pull ${branch.name} from origin`
+                  }
                 >
                   <ArrowDownToLine aria-hidden="true" className="mx-auto" size={14} />
                 </Button>
@@ -66,12 +77,17 @@ function BranchesPanel() {
               {branch.isCurrent && branch.name !== baseBranchName ? (
                 <Button
                   className="w-8 self-stretch p-0"
+                  disabled={gitOperationState.isInProgress}
                   size="sm"
                   variant="secondary"
                   onClick={() => {
                     postMergeFromBase(branch.name);
                   }}
-                  title={`Merge ${baseBranchName} into ${branch.name}`}
+                  title={
+                    gitOperationState.isInProgress
+                      ? "Git action in progress. Check terminal."
+                      : `Merge ${baseBranchName} into ${branch.name}`
+                  }
                 >
                   <GitMerge aria-hidden="true" className="mx-auto" size={14} />
                 </Button>

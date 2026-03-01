@@ -1,5 +1,5 @@
 {
-  "name": "cursor-branch-switcher",
+  "name": "rd-git",
   "repository": {
     "type": "git",
     "url": ""
@@ -7,7 +7,7 @@
   "license": "MIT",
   "displayName": "RobDev Git",
   "description": "Show top 5 recently used local branches and switch with one click.",
-  "version": "0.0.35",
+  "version": "0.0.44",
   "publisher": "local",
   "engines": {
     "vscode": "^1.85.0"
@@ -26,48 +26,68 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "branchSwitcher",
+          "id": "rd-git",
           "title": "RobDev Git",
           "icon": "resources/icon.svg"
         }
       ]
     },
     "views": {
-      "branchSwitcher": [
+      "rd-git": [
         {
-          "id": "recentBranchesView",
+          "id": "rd-git.view",
           "name": "Recent Branches",
           "type": "webview"
         }
       ]
     },
+    "configuration": {
+      "title": "RDgit",
+      "properties": {
+        "rd-git.gitCommands.switchBranch": {
+          "type": "string",
+          "default": "git checkout {{targetBranch}}",
+          "markdownDescription": "Terminal command template used by **Switch Branch**. Supports placeholder: `{{targetBranch}}`."
+        },
+        "rd-git.gitCommands.pullFromOrigin": {
+          "type": "string",
+          "default": "git pull",
+          "markdownDescription": "Terminal command template used by **Pull From Origin**. Supports placeholder: `{{targetBranch}}`."
+        },
+        "rd-git.gitCommands.mergeFromBase": {
+          "type": "string",
+          "default": "git merge {{baseBranch}}",
+          "markdownDescription": "Terminal command template used by **Merge From Base**. Supports placeholders: `{{baseBranch}}`, `{{targetBranch}}`."
+        }
+      }
+    },
     "commands": [
       {
-        "command": "branchSwitcher.switchBranch",
+        "command": "rd-git.switchBranch",
         "title": "Switch Branch"
       },
       {
-        "command": "branchSwitcher.mergeFromBase",
+        "command": "rd-git.mergeFromBase",
         "title": "Merge Base Into Branch"
       },
       {
-        "command": "branchSwitcher.signInGithub",
+        "command": "rd-git.signInGithub",
         "title": "Sign In to GitHub"
       },
       {
-        "command": "branchSwitcher.switchGithubAccount",
+        "command": "rd-git.switchGithubAccount",
         "title": "Switch GitHub Account"
       },
       {
-        "command": "branchSwitcher.openGithubAccounts",
+        "command": "rd-git.openGithubAccounts",
         "title": "Open GitHub Accounts"
       }
     ],
     "menus": {
       "view/item/context": [
         {
-          "command": "branchSwitcher.mergeFromBase",
-          "when": "view == recentBranchesView && viewItem == branchSwitcher.branchItem",
+          "command": "rd-git.mergeFromBase",
+          "when": "view == rd-git.view && viewItem == rd-git.branchItem",
           "group": "inline"
         }
       ]
@@ -99,5 +119,5 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },
-  "robdevBuildCode": "2a545a69-b1ee-471d-9c8a-f5d66598f557"
+  "robdevBuildCode": "00562ead-0395-40d2-8ae6-e0873ad96669"
 }
