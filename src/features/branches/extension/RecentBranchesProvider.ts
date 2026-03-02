@@ -6,7 +6,8 @@ import type { Repository } from "../../../shared/extension";
 import type { RecentBranch } from "../../../shared/webview/contracts";
 
 const MAX_STORED_BRANCHES = 20;
-const MAX_VISIBLE_BRANCHES = 5;
+const PRIMARY_BRANCH_COUNT = 4;
+const PRIMARY_NON_BASE_BRANCH_COUNT = 3;
 
 type ExecFileAsync = (
   file: string,
@@ -34,6 +35,7 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
   private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<BranchItem | undefined | void>();
   private readonly execFileAsync = promisify(execFile) as unknown as ExecFileAsync;
   private repository: Repository | undefined;
+  private readonly startupPrimaryBranchesByRepo = new Map<string, string[]>();
 
   public readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
 
@@ -80,35 +82,60 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
   }
 
   public async getRecentBranches(): Promise<RecentBranch[]> {
+    const groupedBranches = await this.getGroupedBranches();
+    return groupedBranches.primaryBranches;
+  }
+
+  public async getGroupedBranches(): Promise<{
+    baseBranchName: string;
+    branches: RecentBranch[];
+    primaryBranches: RecentBranch[];
+    otherBranches: RecentBranch[];
+  }> {
     if (!this.repository) {
-      return [];
+      return {
+        baseBranchName: "main",
+        branches: [],
+        primaryBranches: [],
+        otherBranches: []
+      };
     }
 
     const mru = this.getMruForCurrentRepo();
     const baseBranchName = await this.getBaseBranchName();
-    const orderedBranchNames: string[] = [];
-    if (baseBranchName) {
-      orderedBranchNames.push(baseBranchName);
-    }
-    for (const branchName of mru) {
-      if (branchName === baseBranchName) {
-        continue;
-      }
-      orderedBranchNames.push(branchName);
-    }
-    const filtered = orderedBranchNames.slice(0, MAX_VISIBLE_BRANCHES);
+    const repoStorageKey = this.getStorageKey(this.repository.rootUri.fsPath);
+    const alphabeticBranchNames = await this.getAlphabeticBranchNames(baseBranchName, mru);
+    const startupPrimaryBranchNames = this.getOrCreateStartupPrimaryBranchNames(
+      repoStorageKey,
+      baseBranchName,
+      mru,
+      alphabeticBranchNames
+    );
+    const primaryBranchNames = this.getCurrentPrimaryBranchNames(startupPrimaryBranchNames, alphabeticBranchNames);
+    const primaryBranchNameSet = new Set(primaryBranchNames);
+    const otherBranchNames = alphabeticBranchNames.filter((branchName) => !primaryBranchNameSet.has(branchName));
+    const allBranchNames = [...primaryBranchNames, ...otherBranchNames];
     const headName = this.normalizeBranchName(this.repository.state.HEAD?.name ?? "");
+    const inferredParents = await this.inferParentBranches(allBranchNames, baseBranchName);
     const items = await Promise.all(
-      filtered.map(async (name) => {
+      allBranchNames.map(async (name) => {
         const description = await this.getLastCommitDescription(name);
         return {
           name,
           isCurrent: name === headName,
-          lastCommitDescription: description
+          lastCommitDescription: description,
+          inferredParentBranchName: inferredParents.get(name)
         };
       })
     );
-    return items;
+    const primaryBranches = items.slice(0, primaryBranchNames.length);
+    const otherBranches = items.slice(primaryBranchNames.length);
+    return {
+      baseBranchName,
+      branches: items,
+      primaryBranches,
+      otherBranches
+    };
   }
 
   public async getBaseBranchName() {
@@ -131,6 +158,97 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
 
   private getStorageKey(repoPath: string) {
     return `rd-git.mru.${repoPath}`;
+  }
+
+  private async getAlphabeticBranchNames(baseBranchName: string, mru: string[]) {
+    const localBranchNames = await this.getLocalBranchNames();
+    const headName = this.normalizeBranchName(this.repository?.state.HEAD?.name ?? "");
+    const branchNameSet = new Set<string>();
+    if (baseBranchName) {
+      branchNameSet.add(baseBranchName);
+    }
+    if (headName) {
+      branchNameSet.add(headName);
+    }
+    for (const branchName of localBranchNames) {
+      branchNameSet.add(branchName);
+    }
+    for (const branchName of mru) {
+      branchNameSet.add(branchName);
+    }
+    return Array.from(branchNameSet).sort((firstBranchName, secondBranchName) =>
+      firstBranchName.localeCompare(secondBranchName)
+    );
+  }
+
+  private getOrCreateStartupPrimaryBranchNames(
+    repoStorageKey: string,
+    baseBranchName: string,
+    mru: string[],
+    alphabeticBranchNames: string[]
+  ) {
+    const existing = this.startupPrimaryBranchesByRepo.get(repoStorageKey);
+    if (existing) {
+      return existing;
+    }
+
+    const alphabeticSet = new Set(alphabeticBranchNames);
+    const startupPrimaryBranchNames: string[] = [];
+    if (baseBranchName && alphabeticSet.has(baseBranchName)) {
+      startupPrimaryBranchNames.push(baseBranchName);
+    }
+
+    for (const branchName of mru) {
+      if (branchName === baseBranchName || !alphabeticSet.has(branchName)) {
+        continue;
+      }
+      if (startupPrimaryBranchNames.includes(branchName)) {
+        continue;
+      }
+      startupPrimaryBranchNames.push(branchName);
+      if (startupPrimaryBranchNames.length >= PRIMARY_BRANCH_COUNT) {
+        break;
+      }
+    }
+
+    this.startupPrimaryBranchesByRepo.set(repoStorageKey, startupPrimaryBranchNames);
+    return startupPrimaryBranchNames;
+  }
+
+  private getCurrentPrimaryBranchNames(startupPrimaryBranchNames: string[], alphabeticBranchNames: string[]) {
+    const alphabeticSet = new Set(alphabeticBranchNames);
+    const primaryBranchNames: string[] = [];
+
+    for (const branchName of startupPrimaryBranchNames) {
+      if (!alphabeticSet.has(branchName) || primaryBranchNames.includes(branchName)) {
+        continue;
+      }
+      primaryBranchNames.push(branchName);
+      if (primaryBranchNames.length >= PRIMARY_BRANCH_COUNT) {
+        return primaryBranchNames;
+      }
+    }
+
+    let nonBaseBranchCount = primaryBranchNames.length > 0 ? primaryBranchNames.length - 1 : 0;
+    for (const branchName of alphabeticBranchNames) {
+      if (primaryBranchNames.includes(branchName)) {
+        continue;
+      }
+      if (primaryBranchNames.length === 0) {
+        primaryBranchNames.push(branchName);
+        continue;
+      }
+      if (nonBaseBranchCount >= PRIMARY_NON_BASE_BRANCH_COUNT) {
+        continue;
+      }
+      primaryBranchNames.push(branchName);
+      nonBaseBranchCount += 1;
+      if (primaryBranchNames.length >= PRIMARY_BRANCH_COUNT) {
+        break;
+      }
+    }
+
+    return primaryBranchNames.slice(0, PRIMARY_BRANCH_COUNT);
   }
 
   private getMruForCurrentRepo() {
@@ -180,6 +298,168 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
       return this.formatRelativeTime(timestampSeconds * 1000);
     } catch {
       return "no commits";
+    }
+  }
+
+  private async inferParentBranches(branchNames: string[], baseBranchName: string) {
+    const inferredParents = new Map<string, string | undefined>();
+    const candidateBranches = await this.getCandidateParentBranches(branchNames, baseBranchName);
+
+    await Promise.all(
+      branchNames.map(async (branchName) => {
+        const inferredParent = await this.inferParentBranch(branchName, candidateBranches, baseBranchName);
+        inferredParents.set(branchName, inferredParent);
+      })
+    );
+
+    return inferredParents;
+  }
+
+  private async getCandidateParentBranches(branchNames: string[], baseBranchName: string) {
+    const localBranches = await this.getLocalBranchNames();
+    const mruBranches = this.getMruForCurrentRepo();
+    const candidates = new Set<string>();
+    if (baseBranchName) {
+      candidates.add(baseBranchName);
+    }
+    for (const localBranch of localBranches) {
+      candidates.add(localBranch);
+    }
+    for (const mruBranch of mruBranches) {
+      candidates.add(mruBranch);
+    }
+    for (const currentBranch of branchNames) {
+      candidates.delete(currentBranch);
+    }
+    return Array.from(candidates);
+  }
+
+  private async inferParentBranch(
+    branchName: string,
+    candidateBranches: string[],
+    baseBranchName: string
+  ) {
+    if (!candidateBranches.length) {
+      return baseBranchName;
+    }
+
+    const directAncestorCandidates = await this.findDirectAncestorCandidates(branchName, candidateBranches);
+    if (directAncestorCandidates.length > 0) {
+      const selected = directAncestorCandidates.sort((first, second) => second.commitTimestamp - first.commitTimestamp)[0];
+      this.logStore.info(
+        "branches",
+        `Inferred parent for '${branchName}' as '${selected.branchName}' (direct ancestor).`
+      );
+      return selected.branchName;
+    }
+
+    const mergeBaseCandidates = await this.findMergeBaseCandidates(branchName, candidateBranches);
+    if (mergeBaseCandidates.length > 0) {
+      const selected = mergeBaseCandidates.sort((first, second) => second.mergeBaseTimestamp - first.mergeBaseTimestamp)[0];
+      this.logStore.info(
+        "branches",
+        `Inferred parent for '${branchName}' as '${selected.branchName}' (latest merge-base).`
+      );
+      return selected.branchName;
+    }
+
+    this.logStore.warn(
+      "branches",
+      `Could not infer parent for '${branchName}'. Falling back to '${baseBranchName}'.`
+    );
+    return baseBranchName;
+  }
+
+  private async findDirectAncestorCandidates(branchName: string, candidateBranches: string[]) {
+    const matches = await Promise.all(
+      candidateBranches.map(async (candidateBranchName) => {
+        const isAncestor = await this.isAncestor(candidateBranchName, branchName);
+        if (!isAncestor) {
+          return undefined;
+        }
+        const commitTimestamp = await this.getBranchHeadTimestamp(candidateBranchName);
+        return {
+          branchName: candidateBranchName,
+          commitTimestamp
+        };
+      })
+    );
+    return matches.filter((value): value is { branchName: string; commitTimestamp: number } => !!value);
+  }
+
+  private async findMergeBaseCandidates(branchName: string, candidateBranches: string[]) {
+    const matches = await Promise.all(
+      candidateBranches.map(async (candidateBranchName) => {
+        const mergeBase = await this.getMergeBase(branchName, candidateBranchName);
+        if (!mergeBase) {
+          return undefined;
+        }
+        const mergeBaseTimestamp = await this.getCommitTimestamp(mergeBase);
+        if (!Number.isFinite(mergeBaseTimestamp) || mergeBaseTimestamp <= 0) {
+          return undefined;
+        }
+        return {
+          branchName: candidateBranchName,
+          mergeBaseTimestamp
+        };
+      })
+    );
+    return matches.filter((value): value is { branchName: string; mergeBaseTimestamp: number } => !!value);
+  }
+
+  private async getLocalBranchNames() {
+    try {
+      const stdout = await this.runGitCommand(["for-each-ref", "--format=%(refname:short)", "refs/heads"]);
+      return stdout
+        .split("\n")
+        .map((line) => this.normalizeBranchName(line.trim()))
+        .filter((name) => name.length > 0);
+    } catch {
+      return [];
+    }
+  }
+
+  private async isAncestor(ancestorBranchName: string, targetBranchName: string) {
+    if (!this.repository) {
+      return false;
+    }
+    try {
+      await this.execFileAsync("git", ["merge-base", "--is-ancestor", ancestorBranchName, targetBranchName], {
+        cwd: this.repository.rootUri.fsPath
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async getMergeBase(firstBranchName: string, secondBranchName: string) {
+    try {
+      const stdout = await this.runGitCommand(["merge-base", firstBranchName, secondBranchName]);
+      const mergeBase = stdout.trim();
+      if (!mergeBase) {
+        return undefined;
+      }
+      return mergeBase;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async getBranchHeadTimestamp(branchName: string) {
+    return this.getCommitTimestamp(branchName);
+  }
+
+  private async getCommitTimestamp(revision: string) {
+    try {
+      const stdout = await this.runGitCommand(["log", "-1", "--format=%ct", revision]);
+      const timestampSeconds = Number(stdout.trim());
+      if (!Number.isFinite(timestampSeconds) || timestampSeconds <= 0) {
+        return 0;
+      }
+      return timestampSeconds;
+    } catch {
+      return 0;
     }
   }
 

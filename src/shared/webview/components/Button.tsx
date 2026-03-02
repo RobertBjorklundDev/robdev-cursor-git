@@ -43,12 +43,51 @@ function getClassName(parts: Array<string | undefined>) {
 
 function Button({
   className,
+  onBlur,
+  onClick,
+  onFocus,
+  onMouseEnter,
+  onMouseLeave,
   size = "md",
+  title,
   type = "button",
   variant = "secondary",
   width = "auto",
   ...props
 }: ButtonProps) {
+  const [isTooltipVisible, setIsTooltipVisible] = React.useState(false);
+  const tooltipTimeoutRef = React.useRef<number | null>(null);
+
+  const tooltipText = typeof title === "string" && title.length > 0 ? title : null;
+
+  function clearTooltipTimeout() {
+    if (tooltipTimeoutRef.current !== null) {
+      window.clearTimeout(tooltipTimeoutRef.current);
+      tooltipTimeoutRef.current = null;
+    }
+  }
+
+  function scheduleTooltipOpen() {
+    if (tooltipText === null) {
+      return;
+    }
+    clearTooltipTimeout();
+    tooltipTimeoutRef.current = window.setTimeout(() => {
+      setIsTooltipVisible(true);
+    }, 150);
+  }
+
+  function hideTooltip() {
+    clearTooltipTimeout();
+    setIsTooltipVisible(false);
+  }
+
+  React.useEffect(() => {
+    return () => {
+      clearTooltipTimeout();
+    };
+  }, []);
+
   const classes = getClassName([
     "cursor-pointer border font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--vscode-focusBorder)",
     getVariantClasses(variant),
@@ -57,7 +96,72 @@ function Button({
     className
   ]);
 
-  return <button className={classes} type={type} {...props} />;
+  const wrapperClasses = getClassName([
+    "relative inline-flex",
+    width === "full" ? "w-full" : undefined
+  ]);
+
+  const buttonElement = (
+    <button
+      className={classes}
+      type={type}
+      onBlur={(event) => {
+        hideTooltip();
+        if (onBlur) {
+          onBlur(event);
+        }
+      }}
+      onFocus={(event) => {
+        scheduleTooltipOpen();
+        if (onFocus) {
+          onFocus(event);
+        }
+      }}
+      onMouseEnter={(event) => {
+        if (onMouseEnter) {
+          onMouseEnter(event);
+        }
+      }}
+      onMouseLeave={(event) => {
+        if (onMouseLeave) {
+          onMouseLeave(event);
+        }
+      }}
+      onClick={(event) => {
+        hideTooltip();
+        if (onClick) {
+          onClick(event);
+        }
+      }}
+      {...props}
+    />
+  );
+
+  if (tooltipText === null) {
+    return buttonElement;
+  }
+
+  return (
+    <span
+      className={wrapperClasses}
+      onMouseEnter={() => {
+        scheduleTooltipOpen();
+      }}
+      onMouseLeave={() => {
+        hideTooltip();
+      }}
+    >
+      {buttonElement}
+      {isTooltipVisible ? (
+        <span
+          className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-(--vscode-widget-border,var(--vscode-contrastBorder,transparent)) bg-(--vscode-editorHoverWidget-background,var(--vscode-editor-background)) px-2 py-1 text-[11px] text-(--vscode-editorHoverWidget-foreground,var(--vscode-foreground)) shadow-lg"
+          role="tooltip"
+        >
+          {tooltipText}
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 export { Button };

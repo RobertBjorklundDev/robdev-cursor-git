@@ -2,6 +2,7 @@ interface RecentBranch {
   name: string;
   isCurrent: boolean;
   lastCommitDescription: string;
+  inferredParentBranchName?: string;
 }
 
 interface PullRequestSummary {
@@ -23,7 +24,7 @@ interface GitHubAuthStatus {
   isAuthenticated: boolean;
 }
 
-type GitOperationType = "pullFromOrigin" | "mergeFromBase" | undefined;
+type GitOperationType = "pullFromOrigin" | "pushToOrigin" | "mergeFromBase" | "splitBranch" | undefined;
 
 interface GitOperationState {
   isInProgress: boolean;
@@ -48,18 +49,27 @@ interface BranchActionMessage {
   type:
     | "switchBranch"
     | "pullFromOrigin"
+    | "pushToOrigin"
     | "mergeFromBase"
+    | "splitBranch"
     | "requestRefresh"
     | "ready"
     | "openPullRequest"
+    | "createDraftPullRequest"
     | "mergePullRequest"
     | "markPullRequestReady"
+    | "markPullRequestDraft"
+    | "selectBranch"
     | "signInGithub"
     | "switchGithubAccount"
     | "openGithubAccounts"
     | "clearLogs"
     | "setLogLevelFilters";
   branchName?: string;
+  headBranchName?: string;
+  baseBranchName?: string;
+  newBranchName?: string;
+  selectedBranchName?: string;
   pullRequestId?: number;
   pullRequestUrl?: string;
   logLevels?: LogLevel[];
@@ -68,6 +78,8 @@ interface BranchActionMessage {
 interface WebviewSetBranchesMessage {
   type: "setBranches";
   branches: RecentBranch[];
+  primaryBranches: RecentBranch[];
+  otherBranches: RecentBranch[];
   baseBranchName: string;
   isLoading: boolean;
 }
@@ -118,6 +130,8 @@ interface WebviewAssets {
 
 interface PersistedAppState {
   branches: RecentBranch[];
+  primaryBranches: RecentBranch[];
+  otherBranches: RecentBranch[];
   pullRequests: PullRequestSummary[];
   logs: LogEntry[];
   isLogAutoScrollEnabled: boolean;
@@ -127,10 +141,13 @@ interface PersistedAppState {
   baseBranchName: string;
   isLoading: boolean;
   authStatus: GitHubAuthStatus;
+  selectedBranchName?: string;
 }
 
 interface PersistedWebviewState {
   branches: RecentBranch[];
+  primaryBranches: RecentBranch[];
+  otherBranches: RecentBranch[];
   pullRequests: PullRequestSummary[];
   authStatus: GitHubAuthStatus;
   baseBranchName: string;

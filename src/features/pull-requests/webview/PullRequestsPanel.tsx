@@ -12,6 +12,7 @@ function PullRequestsPanel() {
     pullRequestFilter,
     postMergePullRequest,
     postMarkPullRequestReady,
+    postMarkPullRequestDraft,
     postOpenGithubAccounts,
     postOpenPullRequest,
     postSignInGithub,
@@ -171,7 +172,8 @@ function PullRequestsPanel() {
 
                   {pullRequest.isDraft ? (
                     <Button
-                      className="w-8 self-stretch p-0"
+                      aria-label="Mark pull request as ready for review"
+                      className="inline-flex w-8 self-stretch items-center justify-center p-0"
                       size="sm"
                       variant="secondary"
                       onClick={() => {
@@ -179,25 +181,44 @@ function PullRequestsPanel() {
                       }}
                       title="Mark pull request as ready for review"
                     >
-                      <Pencil aria-hidden="true" className="mx-auto" size={14} />
+                      <Pencil aria-hidden="true" size={14} />
                     </Button>
                   ) : (
-                    <Button
-                      className="w-8 self-stretch p-0"
-                      size="sm"
-                      variant="secondary"
-                      disabled={pullRequest.mergeable !== true}
-                      onClick={() => {
-                        postMergePullRequest(pullRequest.id);
-                      }}
-                      title={
-                        pullRequest.mergeable === true
-                          ? "Merge pull request"
-                          : "Pull request is not mergeable"
-                      }
-                    >
-                      <GitMerge aria-hidden="true" className="mx-auto" size={14} />
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        aria-label="Convert pull request to draft"
+                        className="inline-flex w-8 self-stretch items-center justify-center p-0"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => {
+                          postMarkPullRequestDraft(pullRequest.id);
+                        }}
+                        title="Convert pull request to draft"
+                      >
+                        <Pencil aria-hidden="true" size={14} />
+                      </Button>
+                      <Button
+                        aria-label={
+                          pullRequest.mergeable === true
+                            ? "Merge pull request"
+                            : "Merge unavailable: pull request is not mergeable"
+                        }
+                        className="inline-flex w-8 self-stretch items-center justify-center p-0"
+                        size="sm"
+                        variant="secondary"
+                        disabled={pullRequest.mergeable !== true}
+                        onClick={() => {
+                          postMergePullRequest(pullRequest.id);
+                        }}
+                        title={
+                          pullRequest.mergeable === true
+                            ? "Merge pull request"
+                            : "Pull request is not mergeable"
+                        }
+                      >
+                        <GitMerge aria-hidden="true" size={14} />
+                      </Button>
+                    </div>
                   )}
                 </div>
               ))

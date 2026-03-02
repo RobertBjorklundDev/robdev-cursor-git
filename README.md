@@ -8,7 +8,8 @@ Shows the top 5 most recently used local branches for the current Git repository
 - Shows `Recent Branches` in a Tree View.
 - Tracks branch changes through Git API events.
 - Stores per-repository MRU lists in `workspaceState`.
-- Runs branch switch, pull, and merge commands in a visible terminal (`RDgit`).
+- Uses Git API for branch switching.
+- Runs pull/push/merge/split commands in a visible terminal (`RDgit`) for conflict and prompt handling.
 
 ## Command templates (settings)
 
@@ -60,3 +61,9 @@ What it does:
 - Attempts to trigger `Developer: Reload Window` automatically on macOS
 
 If automatic reload is blocked (for example by macOS accessibility permissions), run `Developer: Reload Window` manually in Cursor.
+
+## Lessons learned
+
+Repository-specific notes live under `lessons-learned/`.
+
+- `lessons-learned/api-first-terminal-fallback.md`: API-first decision rule for Git/PR actions.

@@ -21,6 +21,8 @@ import {
 interface WebviewAppStateContextValue {
   assets: WebviewAssets;
   branches: RecentBranch[];
+  primaryBranches: RecentBranch[];
+  otherBranches: RecentBranch[];
   pullRequests: PullRequestSummary[];
   logs: LogEntry[];
   isLogAutoScrollEnabled: boolean;
@@ -31,18 +33,24 @@ interface WebviewAppStateContextValue {
   isLoading: boolean;
   authStatus: GitHubAuthStatus;
   gitOperationState: GitOperationState;
+  selectedBranchName: string | undefined;
   setIsLogAutoScrollEnabled(value: boolean): void;
   setActiveLogLevels(value: LogLevel[]): void;
   setActiveTab(value: ActiveTab): void;
   setPullRequestFilter(value: PullRequestFilter): void;
+  setSelectedBranchName(value: string | undefined): void;
   postSwitchBranch(branchName: string): void;
-  postMergeFromBase(branchName: string): void;
+  postMergeFromBase(branchName: string, baseBranchName?: string): void;
   postPullFromOrigin(branchName: string): void;
+  postPushToOrigin(branchName: string): void;
+  postSplitBranch(branchName: string, newBranchName?: string): void;
   postClearLogs(): void;
   postRequestRefresh(): void;
   postOpenPullRequest(url: string): void;
+  postCreateDraftPullRequest(headBranchName: string, baseBranchName: string): void;
   postMergePullRequest(pullRequestId: number): void;
   postMarkPullRequestReady(pullRequestId: number): void;
+  postMarkPullRequestDraft(pullRequestId: number): void;
   postSignInGithub(): void;
   postSwitchGithubAccount(): void;
   postOpenGithubAccounts(): void;
@@ -78,6 +86,15 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
   const vscode = useMemo(() => getVsCodeApi(window), []);
   const restoredState = useMemo(() => restorePersistedAppState(vscode), [vscode]);
   const [branches, setBranches] = useState<RecentBranch[]>(() => restoredState.branches ?? []);
+  const [primaryBranches, setPrimaryBranches] = useState<RecentBranch[]>(() => {
+    if (restoredState.primaryBranches) {
+      return restoredState.primaryBranches;
+    }
+    return restoredState.branches ?? [];
+  });
+  const [otherBranches, setOtherBranches] = useState<RecentBranch[]>(
+    () => restoredState.otherBranches ?? []
+  );
   const [pullRequests, setPullRequests] = useState<PullRequestSummary[]>(
     () => restoredState.pullRequests ?? []
   );
@@ -108,10 +125,15 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
     terminalName: undefined,
     notice: undefined
   });
+  const [selectedBranchName, setSelectedBranchName] = useState<string | undefined>(
+    () => restoredState.selectedBranchName
+  );
 
   useEffect(() => {
     const nextState: PersistedAppState = {
       branches,
+      primaryBranches,
+      otherBranches,
       pullRequests,
       logs,
       isLogAutoScrollEnabled,
@@ -120,7 +142,8 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
       pullRequestFilter,
       baseBranchName,
       isLoading,
-      authStatus
+      authStatus,
+      selectedBranchName
     };
     vscode.setState(nextState);
   }, [
@@ -128,12 +151,15 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
     authStatus,
     baseBranchName,
     branches,
+    primaryBranches,
+    otherBranches,
     isLoading,
     isLogAutoScrollEnabled,
     activeLogLevelsState,
     logs,
     pullRequestFilter,
     pullRequests,
+    selectedBranchName,
     vscode
   ]);
 
@@ -145,6 +171,8 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
       }
       if (message.type === "setBranches") {
         setBranches(message.branches);
+        setPrimaryBranches(message.primaryBranches);
+        setOtherBranches(message.otherBranches);
         setBaseBranchName(message.baseBranchName);
         setIsLoading(message.isLoading);
         return;
@@ -185,8 +213,8 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
     vscode.postMessage({ type: "switchBranch", branchName });
   }
 
-  function postMergeFromBase(branchName: string) {
-    vscode.postMessage({ type: "mergeFromBase", branchName });
+  function postMergeFromBase(branchName: string, baseBranchName?: string) {
+    vscode.postMessage({ type: "mergeFromBase", branchName, baseBranchName });
   }
 
   function postPullFromOrigin(branchName: string) {
@@ -226,6 +254,22 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
     vscode.postMessage({ type: "markPullRequestReady", pullRequestId });
   }
 
+  function postMarkPullRequestDraft(pullRequestId: number) {
+    vscode.postMessage({ type: "markPullRequestDraft", pullRequestId });
+  }
+
+  function postPushToOrigin(branchName: string) {
+    vscode.postMessage({ type: "pushToOrigin", branchName });
+  }
+
+  function postSplitBranch(branchName: string, newBranchName?: string) {
+    vscode.postMessage({ type: "splitBranch", branchName, newBranchName });
+  }
+
+  function postCreateDraftPullRequest(headBranchName: string, baseBranchName: string) {
+    vscode.postMessage({ type: "createDraftPullRequest", headBranchName, baseBranchName });
+  }
+
   function postSignInGithub() {
     vscode.postMessage({ type: "signInGithub" });
   }
@@ -241,6 +285,8 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
   const value: WebviewAppStateContextValue = {
     assets,
     branches,
+    primaryBranches,
+    otherBranches,
     pullRequests,
     logs,
     isLogAutoScrollEnabled,
@@ -251,18 +297,24 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
     isLoading,
     authStatus,
     gitOperationState,
+    selectedBranchName,
     setIsLogAutoScrollEnabled,
     setActiveLogLevels,
     setActiveTab,
     setPullRequestFilter,
+    setSelectedBranchName,
     postSwitchBranch,
     postMergeFromBase,
     postPullFromOrigin,
+    postPushToOrigin,
+    postSplitBranch,
     postClearLogs,
     postRequestRefresh,
     postOpenPullRequest,
+    postCreateDraftPullRequest,
     postMergePullRequest,
     postMarkPullRequestReady,
+    postMarkPullRequestDraft,
     postSignInGithub,
     postSwitchGithubAccount,
     postOpenGithubAccounts

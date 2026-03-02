@@ -27,11 +27,17 @@ interface GitHubPullRequestListItem {
 interface GitHubPullRequestDetailItem {
   mergeable: boolean | null;
   mergeable_state: string;
+  node_id?: string;
 }
 
 interface GitHubRepository {
   owner: string;
   name: string;
+}
+
+interface GraphQlResponse<TData> {
+  data?: TData;
+  errors?: Array<{ message?: string }>;
 }
 
 type ExecFileAsync = (
@@ -265,14 +271,13 @@ class PullRequestsProvider {
 
       this.logStore.info(
         "pull-requests",
-        `PATCH /repos/${targetRepository.owner}/${targetRepository.name}/pulls/${pullRequestId} (draft=false)`
+        `POST /repos/${targetRepository.owner}/${targetRepository.name}/pulls/${pullRequestId}/ready_for_review`
       );
       const response = await fetch(
-        `${GITHUB_API_URL}/repos/${targetRepository.owner}/${targetRepository.name}/pulls/${pullRequestId}`,
+        `${GITHUB_API_URL}/repos/${targetRepository.owner}/${targetRepository.name}/pulls/${pullRequestId}/ready_for_review`,
         {
-          method: "PATCH",
-          headers: this.getGitHubHeaders(session.accessToken),
-          body: JSON.stringify({ draft: false })
+          method: "POST",
+          headers: this.getGitHubHeaders(session.accessToken)
         }
       );
 
@@ -302,6 +307,184 @@ class PullRequestsProvider {
       return {
         ok: false,
         message: "Failed to mark pull request as ready for review."
+      };
+    }
+  }
+
+  public async markPullRequestDraft(pullRequestId: number) {
+    if (!this.repository) {
+      this.logStore.error("pull-requests", "Mark-as-draft requested without an active repository.");
+      return {
+        ok: false,
+        message: "No Git repository is available."
+      };
+    }
+
+    try {
+      const session = await this.getGitHubSession();
+      if (!session) {
+        this.logStore.error("pull-requests", "Mark-as-draft requested without GitHub auth session.");
+        return {
+          ok: false,
+          message: "GitHub authentication is required."
+        };
+      }
+
+      const targetRepository = await this.resolveGitHubRepository(this.repository);
+      if (!targetRepository) {
+        this.logStore.error(
+          "pull-requests",
+          "Mark-as-draft requested but origin remote is not a supported GitHub URL."
+        );
+        return {
+          ok: false,
+          message: "Could not determine GitHub repository from origin remote."
+        };
+      }
+
+      const pullRequestNodeId = await this.fetchPullRequestNodeId(
+        targetRepository,
+        pullRequestId,
+        session.accessToken
+      );
+      if (!pullRequestNodeId) {
+        return {
+          ok: false,
+          message: `Could not resolve node id for PR #${pullRequestId}.`
+        };
+      }
+
+      const graphQlEndpoint = `${GITHUB_API_URL}/graphql`;
+      this.logStore.info(
+        "github-api",
+        `POST ${graphQlEndpoint} convertPullRequestToDraft for PR #${pullRequestId}`
+      );
+      const response = await fetch(graphQlEndpoint, {
+        method: "POST",
+        headers: this.getGitHubHeaders(session.accessToken),
+        body: JSON.stringify({
+          query:
+            "mutation ConvertPullRequestToDraft($pullRequestId: ID!) { convertPullRequestToDraft(input: { pullRequestId: $pullRequestId }) { pullRequest { id } } }",
+          variables: {
+            pullRequestId: pullRequestNodeId
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const fallbackMessage = `GitHub returned ${response.status}.`;
+        const message = await this.readErrorMessage(response, fallbackMessage);
+        this.logStore.error("pull-requests", `Mark-as-draft failed for PR #${pullRequestId}: ${message}`);
+        return {
+          ok: false,
+          message
+        };
+      }
+
+      const payload = (await response.json()) as GraphQlResponse<{
+        convertPullRequestToDraft?: { pullRequest?: { id?: string } };
+      }>;
+      if (payload.errors && payload.errors.length > 0) {
+        const firstMessage = payload.errors[0]?.message ?? "GraphQL mutation failed.";
+        this.logStore.error("pull-requests", `Mark-as-draft failed for PR #${pullRequestId}: ${firstMessage}`);
+        return {
+          ok: false,
+          message: firstMessage
+        };
+      }
+
+      this.logStore.info("pull-requests", `PR #${pullRequestId} is now draft.`);
+      return {
+        ok: true,
+        message: `Marked PR #${pullRequestId} as draft.`
+      };
+    } catch {
+      this.logStore.error("pull-requests", `Unexpected mark-as-draft failure for PR #${pullRequestId}.`);
+      return {
+        ok: false,
+        message: "Failed to mark pull request as draft."
+      };
+    }
+  }
+
+  public async createDraftPullRequest(headBranchName: string, baseBranchName: string) {
+    if (!this.repository) {
+      this.logStore.error("pull-requests", "Create-draft-PR requested without an active repository.");
+      return {
+        ok: false,
+        message: "No Git repository is available."
+      };
+    }
+
+    try {
+      const session = await this.getGitHubSession();
+      if (!session) {
+        this.logStore.error("pull-requests", "Create-draft-PR requested without GitHub auth session.");
+        return {
+          ok: false,
+          message: "GitHub authentication is required."
+        };
+      }
+
+      const targetRepository = await this.resolveGitHubRepository(this.repository);
+      if (!targetRepository) {
+        this.logStore.error(
+          "pull-requests",
+          "Create-draft-PR requested but origin remote is not a supported GitHub URL."
+        );
+        return {
+          ok: false,
+          message: "Could not determine GitHub repository from origin remote."
+        };
+      }
+
+      this.logStore.info(
+        "pull-requests",
+        `POST /repos/${targetRepository.owner}/${targetRepository.name}/pulls (draft=true, head=${headBranchName}, base=${baseBranchName})`
+      );
+      const response = await fetch(
+        `${GITHUB_API_URL}/repos/${targetRepository.owner}/${targetRepository.name}/pulls`,
+        {
+          method: "POST",
+          headers: this.getGitHubHeaders(session.accessToken),
+          body: JSON.stringify({
+            title: `${headBranchName} -> ${baseBranchName}`,
+            head: headBranchName,
+            base: baseBranchName,
+            draft: true
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const fallbackMessage = `GitHub returned ${response.status}.`;
+        const message = await this.readErrorMessage(response, fallbackMessage);
+        this.logStore.error(
+          "pull-requests",
+          `Create-draft-PR failed for ${headBranchName} -> ${baseBranchName}: ${message}`
+        );
+        return {
+          ok: false,
+          message
+        };
+      }
+
+      this.logStore.info(
+        "pull-requests",
+        `Created draft PR for ${headBranchName} -> ${baseBranchName}.`
+      );
+      return {
+        ok: true,
+        message: `Created draft PR for ${headBranchName} -> ${baseBranchName}.`
+      };
+    } catch {
+      this.logStore.error(
+        "pull-requests",
+        `Unexpected create-draft-PR failure for ${headBranchName} -> ${baseBranchName}.`
+      );
+      return {
+        ok: false,
+        message: "Failed to create draft pull request."
       };
     }
   }
@@ -447,6 +630,38 @@ class PullRequestsProvider {
     );
 
     return details;
+  }
+
+  private async fetchPullRequestNodeId(
+    repository: GitHubRepository,
+    pullRequestId: number,
+    accessToken: string
+  ) {
+    const endpoint = `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/pulls/${pullRequestId}`;
+    this.logStore.info("github-api", `GET ${endpoint}`);
+    try {
+      const response = await fetch(endpoint, {
+        headers: this.getGitHubHeaders(accessToken)
+      });
+      this.logStore.info("github-api", `Response ${response.status} for PR #${pullRequestId} node id.`);
+      if (!response.ok) {
+        const message = await this.readErrorMessage(
+          response,
+          `GitHub returned ${response.status} for PR #${pullRequestId}.`
+        );
+        this.logStore.warn("github-api", message);
+        return undefined;
+      }
+      const payload = (await response.json()) as GitHubPullRequestDetailItem;
+      if (typeof payload.node_id !== "string" || payload.node_id.length === 0) {
+        this.logStore.warn("github-api", `No node_id found for PR #${pullRequestId}.`);
+        return undefined;
+      }
+      return payload.node_id;
+    } catch {
+      this.logStore.warn("github-api", `Failed to fetch node id for PR #${pullRequestId}.`);
+      return undefined;
+    }
   }
 
   private getGitHubHeaders(accessToken: string) {

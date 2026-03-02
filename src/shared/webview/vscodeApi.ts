@@ -42,6 +42,12 @@ function restorePersistedAppState(vscode: VsCodeApi) {
   if (Array.isArray(candidate.branches)) {
     nextState.branches = candidate.branches;
   }
+  if (Array.isArray(candidate.primaryBranches)) {
+    nextState.primaryBranches = candidate.primaryBranches;
+  }
+  if (Array.isArray(candidate.otherBranches)) {
+    nextState.otherBranches = candidate.otherBranches;
+  }
   if (Array.isArray(candidate.pullRequests)) {
     nextState.pullRequests = candidate.pullRequests;
   }
@@ -82,6 +88,9 @@ function restorePersistedAppState(vscode: VsCodeApi) {
     typeof candidate.authStatus.isAuthenticated === "boolean"
   ) {
     nextState.authStatus = candidate.authStatus;
+  }
+  if (typeof candidate.selectedBranchName === "string") {
+    nextState.selectedBranchName = candidate.selectedBranchName;
   }
   return nextState;
 }

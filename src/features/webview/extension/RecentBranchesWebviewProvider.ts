@@ -35,6 +35,8 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
   private readonly extensionBuildCode: string;
   private readonly subscriptions: vscode.Disposable[] = [];
   private lastBranches: RecentBranch[] = [];
+  private lastPrimaryBranches: RecentBranch[] = [];
+  private lastOtherBranches: RecentBranch[] = [];
   private lastPullRequests: PullRequestSummary[] = [];
   private lastAuthStatus: GitHubAuthStatus = {
     isProviderAvailable: true,
@@ -51,6 +53,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
   private hasInitializedHtml = false;
   private visibleRefreshTimer: ReturnType<typeof setInterval> | undefined;
   private lastVisibilityRefreshAt = 0;
+  private renderRequestSequence = 0;
 
   public constructor(
     provider: RecentBranchesProvider,
@@ -167,6 +170,8 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       this.hasInitializedHtml = true;
       this.postBranchesUpdate(
         this.lastBranches,
+        this.lastPrimaryBranches,
+        this.lastOtherBranches,
         this.lastBaseBranchName,
         this.isLoading,
       );
@@ -178,28 +183,49 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       this.postLoading(this.isLoading);
     }
 
+    const renderRequestSequence = this.getNextRenderRequestSequence();
+
     try {
-      const [branches, baseBranchName, pullRequests, authStatus] =
+      const [groupedBranches, pullRequests, authStatus] =
         await Promise.all([
-          this.provider.getRecentBranches(),
-          this.provider.getBaseBranchName(),
+          this.provider.getGroupedBranches(),
           this.pullRequestsProvider.getPullRequests(),
           this.pullRequestsProvider.getAuthStatus(),
         ]);
+      if (!this.isLatestRenderRequest(renderRequestSequence)) {
+        return;
+      }
+      const { branches, primaryBranches, otherBranches, baseBranchName } = groupedBranches;
       this.lastBranches = branches;
+      this.lastPrimaryBranches = primaryBranches;
+      this.lastOtherBranches = otherBranches;
       this.lastBaseBranchName = baseBranchName;
       this.lastPullRequests = pullRequests;
       this.lastAuthStatus = authStatus;
       this.isLoading = false;
       await this.persistCurrentState();
-      this.postBranchesUpdate(branches, baseBranchName, this.isLoading);
+      if (!this.isLatestRenderRequest(renderRequestSequence)) {
+        return;
+      }
+      this.postBranchesUpdate(
+        branches,
+        primaryBranches,
+        otherBranches,
+        baseBranchName,
+        this.isLoading,
+      );
       this.postPullRequestsUpdate(pullRequests);
       this.postAuthStatus(authStatus);
       this.postGitOperationState(this.lastGitOperationState);
     } catch {
+      if (!this.isLatestRenderRequest(renderRequestSequence)) {
+        return;
+      }
       this.isLoading = false;
       this.postBranchesUpdate(
         this.lastBranches,
+        this.lastPrimaryBranches,
+        this.lastOtherBranches,
         this.lastBaseBranchName,
         this.isLoading,
       );
@@ -222,6 +248,8 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
 
   private postBranchesUpdate(
     branches: RecentBranch[],
+    primaryBranches: RecentBranch[],
+    otherBranches: RecentBranch[],
     baseBranchName: string,
     isLoading: boolean,
   ) {
@@ -231,6 +259,8 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     const message: WebviewSetBranchesMessage = {
       type: "setBranches",
       branches,
+      primaryBranches,
+      otherBranches,
       baseBranchName,
       isLoading,
     };
@@ -301,6 +331,8 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     if (message.type === "ready") {
       this.postBranchesUpdate(
         this.lastBranches,
+        this.lastPrimaryBranches,
+        this.lastOtherBranches,
         this.lastBaseBranchName,
         this.isLoading,
       );
@@ -361,6 +393,29 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    if (message.type === "markPullRequestDraft") {
+      if (typeof message.pullRequestId !== "number") {
+        return;
+      }
+      await vscode.commands.executeCommand(
+        "rd-git.markPullRequestDraft",
+        message.pullRequestId,
+      );
+      return;
+    }
+
+    if (message.type === "createDraftPullRequest") {
+      if (typeof message.headBranchName !== "string" || typeof message.baseBranchName !== "string") {
+        return;
+      }
+      await vscode.commands.executeCommand(
+        "rd-git.createDraftPullRequest",
+        message.headBranchName,
+        message.baseBranchName
+      );
+      return;
+    }
+
     if (message.type === "markPullRequestReady") {
       if (typeof message.pullRequestId !== "number") {
         return;
@@ -369,6 +424,10 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
         "rd-git.markPullRequestReady",
         message.pullRequestId,
       );
+      return;
+    }
+
+    if (message.type === "selectBranch") {
       return;
     }
 
@@ -387,7 +446,10 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     if (message.type === "mergeFromBase") {
       await vscode.commands.executeCommand(
         "rd-git.mergeFromBase",
-        message.branchName,
+        {
+          branchName: message.branchName,
+          baseBranchName: message.baseBranchName
+        },
       );
       return;
     }
@@ -396,6 +458,25 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       await vscode.commands.executeCommand(
         "rd-git.pullFromOrigin",
         message.branchName,
+      );
+      return;
+    }
+
+    if (message.type === "pushToOrigin") {
+      await vscode.commands.executeCommand(
+        "rd-git.pushToOrigin",
+        message.branchName,
+      );
+      return;
+    }
+
+    if (message.type === "splitBranch") {
+      await vscode.commands.executeCommand(
+        "rd-git.splitBranch",
+        {
+          branchName: message.branchName,
+          newBranchName: message.newBranchName
+        }
       );
     }
   }
@@ -445,6 +526,8 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       return;
     }
     this.lastBranches = persistedState.branches;
+    this.lastPrimaryBranches = persistedState.primaryBranches;
+    this.lastOtherBranches = persistedState.otherBranches;
     this.lastPullRequests = persistedState.pullRequests;
     this.lastAuthStatus = persistedState.authStatus;
     this.lastBaseBranchName = persistedState.baseBranchName;
@@ -453,11 +536,22 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
   private async persistCurrentState() {
     const state: PersistedWebviewState = {
       branches: this.lastBranches,
+      primaryBranches: this.lastPrimaryBranches,
+      otherBranches: this.lastOtherBranches,
       pullRequests: this.lastPullRequests,
       authStatus: this.lastAuthStatus,
       baseBranchName: this.lastBaseBranchName,
     };
     await this.workspaceState.update(PERSISTED_WEBVIEW_STATE_KEY, state);
+  }
+
+  private getNextRenderRequestSequence() {
+    this.renderRequestSequence += 1;
+    return this.renderRequestSequence;
+  }
+
+  private isLatestRenderRequest(renderRequestSequence: number) {
+    return renderRequestSequence === this.renderRequestSequence;
   }
 }
 
@@ -470,6 +564,8 @@ function isPersistedWebviewState(
   const candidate = value as Partial<PersistedWebviewState>;
   return (
     Array.isArray(candidate.branches) &&
+    Array.isArray(candidate.primaryBranches) &&
+    Array.isArray(candidate.otherBranches) &&
     Array.isArray(candidate.pullRequests) &&
     typeof candidate.baseBranchName === "string" &&
     !!candidate.authStatus &&

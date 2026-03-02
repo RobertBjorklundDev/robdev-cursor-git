@@ -7,7 +7,7 @@
   "license": "MIT",
   "displayName": "RobDev Git",
   "description": "Show top 5 recently used local branches and switch with one click.",
-  "version": "0.0.44",
+  "version": "0.0.52",
   "publisher": "local",
   "engines": {
     "vscode": "^1.85.0"
@@ -54,10 +54,20 @@
           "default": "git pull",
           "markdownDescription": "Terminal command template used by **Pull From Origin**. Supports placeholder: `{{targetBranch}}`."
         },
+        "rd-git.gitCommands.pushToOrigin": {
+          "type": "string",
+          "default": "git push -u origin {{targetBranch}}",
+          "markdownDescription": "Terminal command template used by **Push To Origin**. Supports placeholder: `{{targetBranch}}`."
+        },
         "rd-git.gitCommands.mergeFromBase": {
           "type": "string",
           "default": "git merge {{baseBranch}}",
           "markdownDescription": "Terminal command template used by **Merge From Base**. Supports placeholders: `{{baseBranch}}`, `{{targetBranch}}`."
+        },
+        "rd-git.gitCommands.splitBranch": {
+          "type": "string",
+          "default": "git checkout -b {{newBranch}} {{targetBranch}}",
+          "markdownDescription": "Terminal command template used by **Split Branch**. Supports placeholders: `{{targetBranch}}`, `{{newBranch}}`."
         }
       }
     },
@@ -69,6 +79,26 @@
       {
         "command": "rd-git.mergeFromBase",
         "title": "Merge Base Into Branch"
+      },
+      {
+        "command": "rd-git.pushToOrigin",
+        "title": "Push Branch To Origin"
+      },
+      {
+        "command": "rd-git.splitBranch",
+        "title": "Split Branch"
+      },
+      {
+        "command": "rd-git.createDraftPullRequest",
+        "title": "Create Draft Pull Request"
+      },
+      {
+        "command": "rd-git.markPullRequestDraft",
+        "title": "Mark Pull Request As Draft"
+      },
+      {
+        "command": "rd-git.markPullRequestReady",
+        "title": "Mark Pull Request Ready For Review"
       },
       {
         "command": "rd-git.signInGithub",
@@ -119,5 +149,5 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },
-  "robdevBuildCode": "00562ead-0395-40d2-8ae6-e0873ad96669"
+  "robdevBuildCode": "aa2daf62-31de-4ad7-b57d-ab6e1f6495de"
 }
