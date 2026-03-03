@@ -186,12 +186,10 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     const renderRequestSequence = this.getNextRenderRequestSequence();
 
     try {
-      const [groupedBranches, pullRequests, authStatus] =
-        await Promise.all([
-          this.provider.getGroupedBranches(),
-          this.pullRequestsProvider.getPullRequests(),
-          this.pullRequestsProvider.getAuthStatus(),
-        ]);
+      const groupedBranchesPromise = this.provider.getGroupedBranches();
+      const pullRequestsPromise = this.pullRequestsProvider.getPullRequests();
+      const authStatusPromise = this.pullRequestsProvider.getAuthStatus();
+      const groupedBranches = await groupedBranchesPromise;
       if (!this.isLatestRenderRequest(renderRequestSequence)) {
         return;
       }
@@ -200,10 +198,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       this.lastPrimaryBranches = primaryBranches;
       this.lastOtherBranches = otherBranches;
       this.lastBaseBranchName = baseBranchName;
-      this.lastPullRequests = pullRequests;
-      this.lastAuthStatus = authStatus;
       this.isLoading = false;
-      await this.persistCurrentState();
       if (!this.isLatestRenderRequest(renderRequestSequence)) {
         return;
       }
@@ -214,9 +209,23 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
         baseBranchName,
         this.isLoading,
       );
+      this.postGitOperationState(this.lastGitOperationState);
+
+      const [pullRequests, authStatus] = await Promise.all([
+        pullRequestsPromise,
+        authStatusPromise,
+      ]);
+      if (!this.isLatestRenderRequest(renderRequestSequence)) {
+        return;
+      }
+      this.lastPullRequests = pullRequests;
+      this.lastAuthStatus = authStatus;
+      await this.persistCurrentState();
+      if (!this.isLatestRenderRequest(renderRequestSequence)) {
+        return;
+      }
       this.postPullRequestsUpdate(pullRequests);
       this.postAuthStatus(authStatus);
-      this.postGitOperationState(this.lastGitOperationState);
     } catch {
       if (!this.isLatestRenderRequest(renderRequestSequence)) {
         return;

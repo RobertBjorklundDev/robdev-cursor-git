@@ -1,6 +1,6 @@
 import React from "react";
 import { useWebviewAppContext } from "../../../app/webview/context/WebviewAppContext";
-import { Button, Card } from "../../../shared/webview/components";
+import { Button, Card, Tooltip, TooltipContent, TooltipTrigger } from "../../../shared/webview/components";
 
 function SettingsPanel() {
   const {
@@ -13,11 +13,11 @@ function SettingsPanel() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-auto pr-1">
-      <Card className="mb-2 w-full px-3 py-2.5 font-bold" padding="none">
+      <Card className="mb-2 w-full px-3 py-2 text-sm font-semibold" padding="none">
         Settings
       </Card>
       <Card>
-        <div className="mb-1 text-xs text-(--vscode-descriptionForeground)">
+        <div className="mb-1 text-xs text-muted-foreground">
           GitHub authentication
         </div>
         <div className="mb-3 font-semibold">
@@ -31,27 +31,35 @@ function SettingsPanel() {
           <Button variant="secondary" onClick={postSignInGithub}>
             Sign in with GitHub
           </Button>
-          <Button
-            variant="secondary"
-            disabled={!authStatus.isAuthenticated}
-            onClick={postSwitchGithubAccount}
-            title={authStatus.isAuthenticated ? "Switch to another GitHub account" : "Sign in first"}
-          >
-            Switch GitHub account
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex">
+                <Button
+                  variant="secondary"
+                  disabled={!authStatus.isAuthenticated}
+                  onClick={postSwitchGithubAccount}
+                >
+                  Switch GitHub account
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              {authStatus.isAuthenticated ? "Switch to another GitHub account" : "Sign in first"}
+            </TooltipContent>
+          </Tooltip>
           <Button variant="secondary" onClick={postOpenGithubAccounts}>
             Open Accounts menu
           </Button>
         </div>
       </Card>
       <Card className="mt-2">
-        <div className="mb-1 text-xs text-(--vscode-descriptionForeground)">About</div>
+        <div className="mb-1 text-xs text-muted-foreground">About</div>
         <div className="mb-1 flex items-center justify-between gap-2">
-          <span className="text-(--vscode-descriptionForeground)">Version</span>
+          <span className="text-muted-foreground">Version</span>
           <span className="font-mono text-xs">{assets.extensionVersion}</span>
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span className="text-(--vscode-descriptionForeground)">Build code</span>
+          <span className="text-muted-foreground">Build code</span>
           <span className="font-mono text-xs">{assets.extensionBuildCode}</span>
         </div>
       </Card>

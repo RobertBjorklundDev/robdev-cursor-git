@@ -1,4 +1,5 @@
 import React from "react";
+import { cn } from "./cn";
 
 type CardPadding = "none" | "sm" | "md";
 
@@ -16,19 +17,15 @@ function getCardPaddingClasses(padding: CardPadding) {
   return "p-3";
 }
 
-function getClassName(parts: Array<string | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
-
 const Card = React.forwardRef<HTMLDivElement, CardProps>(function Card(
   { className, padding = "md", ...props },
   ref
 ) {
-  const classes = getClassName([
-    "rounded-lg border border-(--vscode-panel-border) bg-(--vscode-editor-background)",
+  const classes = cn(
+    "rounded-lg border border-border/70 bg-card/90 text-card-foreground",
     getCardPaddingClasses(padding),
     className
-  ]);
+  );
 
   return <div className={classes} ref={ref} {...props} />;
 });

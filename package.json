@@ -7,7 +7,7 @@
   "license": "MIT",
   "displayName": "RobDev Git",
   "description": "Show top 5 recently used local branches and switch with one click.",
-  "version": "0.0.52",
+  "version": "0.0.64",
   "publisher": "local",
   "engines": {
     "vscode": "^1.85.0"
@@ -36,7 +36,7 @@
       "rd-git": [
         {
           "id": "rd-git.view",
-          "name": "Recent Branches",
+          "name": "RDgit",
           "type": "webview"
         }
       ]
@@ -145,9 +145,17 @@
     "vsce": "^2.15.0"
   },
   "dependencies": {
+    "@radix-ui/react-accordion": "^1.2.12",
+    "@radix-ui/react-hover-card": "^1.1.15",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@radix-ui/react-tabs": "^1.1.13",
+    "@radix-ui/react-tooltip": "^1.2.8",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "lucide-react": "^0.575.0",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "tailwind-merge": "^3.5.0"
   },
-  "robdevBuildCode": "aa2daf62-31de-4ad7-b57d-ab6e1f6495de"
+  "robdevBuildCode": "f52ce7ca-b7aa-4440-99fd-1a3740d5f30b"
 }

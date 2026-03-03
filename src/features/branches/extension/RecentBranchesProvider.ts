@@ -6,34 +6,44 @@ import type { Repository } from "../../../shared/extension";
 import type { RecentBranch } from "../../../shared/webview/contracts";
 
 const MAX_STORED_BRANCHES = 20;
-const PRIMARY_BRANCH_COUNT = 4;
-const PRIMARY_NON_BASE_BRANCH_COUNT = 3;
+const PRIMARY_BRANCH_COUNT = 5;
+const PRIMARY_NON_BASE_BRANCH_COUNT = 4;
 
 type ExecFileAsync = (
   file: string,
   args: string[],
-  options: { cwd: string }
+  options: { cwd: string },
 ) => Promise<{ stdout: string; stderr: string }>;
 
 class BranchItem extends vscode.TreeItem {
   public readonly branchName: string;
 
-  public constructor(branchName: string, isCurrent: boolean, lastCommitDescription: string) {
+  public constructor(
+    branchName: string,
+    isCurrent: boolean,
+    lastCommitDescription: string,
+  ) {
     super(branchName, vscode.TreeItemCollapsibleState.None);
     this.branchName = branchName;
     this.command = {
       command: "rd-git.switchBranch",
       title: "Switch Branch",
-      arguments: [branchName]
+      arguments: [branchName],
     };
     this.contextValue = "rd-git.branchItem";
-    this.description = isCurrent ? `current • ${lastCommitDescription}` : lastCommitDescription;
+    this.description = isCurrent
+      ? `current • ${lastCommitDescription}`
+      : lastCommitDescription;
   }
 }
 
 class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
-  private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<BranchItem | undefined | void>();
-  private readonly execFileAsync = promisify(execFile) as unknown as ExecFileAsync;
+  private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<
+    BranchItem | undefined | void
+  >();
+  private readonly execFileAsync = promisify(
+    execFile,
+  ) as unknown as ExecFileAsync;
   private repository: Repository | undefined;
   private readonly startupPrimaryBranchesByRepo = new Map<string, string[]>();
 
@@ -48,6 +58,9 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
   }
 
   public setRepository(repository: Repository | undefined) {
+    if (this.repository === repository) {
+      return;
+    }
     this.repository = repository;
     this.refresh();
   }
@@ -64,8 +77,14 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
 
     const current = this.getMruForCurrentRepo();
     const deduped = current.filter((name) => name !== normalizedBranchName);
-    const updated = [normalizedBranchName, ...deduped].slice(0, MAX_STORED_BRANCHES);
-    await this.state.update(this.getStorageKey(this.repository.rootUri.fsPath), updated);
+    const updated = [normalizedBranchName, ...deduped].slice(
+      0,
+      MAX_STORED_BRANCHES,
+    );
+    await this.state.update(
+      this.getStorageKey(this.repository.rootUri.fsPath),
+      updated,
+    );
   }
 
   public refresh() {
@@ -78,7 +97,14 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
 
   public async getChildren() {
     const branches = await this.getRecentBranches();
-    return branches.map((branch) => new BranchItem(branch.name, branch.isCurrent, branch.lastCommitDescription));
+    return branches.map(
+      (branch) =>
+        new BranchItem(
+          branch.name,
+          branch.isCurrent,
+          branch.lastCommitDescription,
+        ),
+    );
   }
 
   public async getRecentBranches(): Promise<RecentBranch[]> {
@@ -97,26 +123,39 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
         baseBranchName: "main",
         branches: [],
         primaryBranches: [],
-        otherBranches: []
+        otherBranches: [],
       };
     }
 
     const mru = this.getMruForCurrentRepo();
     const baseBranchName = await this.getBaseBranchName();
     const repoStorageKey = this.getStorageKey(this.repository.rootUri.fsPath);
-    const alphabeticBranchNames = await this.getAlphabeticBranchNames(baseBranchName, mru);
+    const alphabeticBranchNames = await this.getAlphabeticBranchNames(
+      baseBranchName,
+      mru,
+    );
     const startupPrimaryBranchNames = this.getOrCreateStartupPrimaryBranchNames(
       repoStorageKey,
       baseBranchName,
       mru,
-      alphabeticBranchNames
+      alphabeticBranchNames,
     );
-    const primaryBranchNames = this.getCurrentPrimaryBranchNames(startupPrimaryBranchNames, alphabeticBranchNames);
+    const primaryBranchNames = this.getCurrentPrimaryBranchNames(
+      startupPrimaryBranchNames,
+      alphabeticBranchNames,
+    );
     const primaryBranchNameSet = new Set(primaryBranchNames);
-    const otherBranchNames = alphabeticBranchNames.filter((branchName) => !primaryBranchNameSet.has(branchName));
+    const otherBranchNames = alphabeticBranchNames.filter(
+      (branchName) => !primaryBranchNameSet.has(branchName),
+    );
     const allBranchNames = [...primaryBranchNames, ...otherBranchNames];
-    const headName = this.normalizeBranchName(this.repository.state.HEAD?.name ?? "");
-    const inferredParents = await this.inferParentBranches(allBranchNames, baseBranchName);
+    const headName = this.normalizeBranchName(
+      this.repository.state.HEAD?.name ?? "",
+    );
+    const inferredParents = await this.inferParentBranches(
+      allBranchNames,
+      baseBranchName,
+    );
     const items = await Promise.all(
       allBranchNames.map(async (name) => {
         const description = await this.getLastCommitDescription(name);
@@ -124,9 +163,9 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
           name,
           isCurrent: name === headName,
           lastCommitDescription: description,
-          inferredParentBranchName: inferredParents.get(name)
+          inferredParentBranchName: inferredParents.get(name),
         };
-      })
+      }),
     );
     const primaryBranches = items.slice(0, primaryBranchNames.length);
     const otherBranches = items.slice(primaryBranchNames.length);
@@ -134,7 +173,7 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
       baseBranchName,
       branches: items,
       primaryBranches,
-      otherBranches
+      otherBranches,
     };
   }
 
@@ -144,7 +183,11 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
     }
 
     try {
-      const stdout = await this.runGitCommand(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+      const stdout = await this.runGitCommand([
+        "symbolic-ref",
+        "--short",
+        "refs/remotes/origin/HEAD",
+      ]);
       const normalized = this.normalizeBranchName(stdout.trim());
       if (normalized.startsWith("origin/")) {
         return normalized.slice("origin/".length);
@@ -160,9 +203,14 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
     return `rd-git.mru.${repoPath}`;
   }
 
-  private async getAlphabeticBranchNames(baseBranchName: string, mru: string[]) {
+  private async getAlphabeticBranchNames(
+    baseBranchName: string,
+    mru: string[],
+  ) {
     const localBranchNames = await this.getLocalBranchNames();
-    const headName = this.normalizeBranchName(this.repository?.state.HEAD?.name ?? "");
+    const headName = this.normalizeBranchName(
+      this.repository?.state.HEAD?.name ?? "",
+    );
     const branchNameSet = new Set<string>();
     if (baseBranchName) {
       branchNameSet.add(baseBranchName);
@@ -177,7 +225,7 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
       branchNameSet.add(branchName);
     }
     return Array.from(branchNameSet).sort((firstBranchName, secondBranchName) =>
-      firstBranchName.localeCompare(secondBranchName)
+      firstBranchName.localeCompare(secondBranchName),
     );
   }
 
@@ -185,7 +233,7 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
     repoStorageKey: string,
     baseBranchName: string,
     mru: string[],
-    alphabeticBranchNames: string[]
+    alphabeticBranchNames: string[],
   ) {
     const existing = this.startupPrimaryBranchesByRepo.get(repoStorageKey);
     if (existing) {
@@ -211,16 +259,25 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
       }
     }
 
-    this.startupPrimaryBranchesByRepo.set(repoStorageKey, startupPrimaryBranchNames);
+    this.startupPrimaryBranchesByRepo.set(
+      repoStorageKey,
+      startupPrimaryBranchNames,
+    );
     return startupPrimaryBranchNames;
   }
 
-  private getCurrentPrimaryBranchNames(startupPrimaryBranchNames: string[], alphabeticBranchNames: string[]) {
+  private getCurrentPrimaryBranchNames(
+    startupPrimaryBranchNames: string[],
+    alphabeticBranchNames: string[],
+  ) {
     const alphabeticSet = new Set(alphabeticBranchNames);
     const primaryBranchNames: string[] = [];
 
     for (const branchName of startupPrimaryBranchNames) {
-      if (!alphabeticSet.has(branchName) || primaryBranchNames.includes(branchName)) {
+      if (
+        !alphabeticSet.has(branchName) ||
+        primaryBranchNames.includes(branchName)
+      ) {
         continue;
       }
       primaryBranchNames.push(branchName);
@@ -229,7 +286,8 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
       }
     }
 
-    let nonBaseBranchCount = primaryBranchNames.length > 0 ? primaryBranchNames.length - 1 : 0;
+    let nonBaseBranchCount =
+      primaryBranchNames.length > 0 ? primaryBranchNames.length - 1 : 0;
     for (const branchName of alphabeticBranchNames) {
       if (primaryBranchNames.includes(branchName)) {
         continue;
@@ -256,7 +314,10 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
       return [];
     }
 
-    const raw = this.state.get<string[]>(this.getStorageKey(this.repository.rootUri.fsPath), []);
+    const raw = this.state.get<string[]>(
+      this.getStorageKey(this.repository.rootUri.fsPath),
+      [],
+    );
     const normalized = raw.map((name) => this.normalizeBranchName(name));
     const seen = new Set<string>();
     const unique: string[] = [];
@@ -290,7 +351,12 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
     }
 
     try {
-      const stdout = await this.runGitCommand(["log", "-1", "--format=%ct", branchName]);
+      const stdout = await this.runGitCommand([
+        "log",
+        "-1",
+        "--format=%ct",
+        branchName,
+      ]);
       const timestampSeconds = Number(stdout.trim());
       if (!Number.isFinite(timestampSeconds) || timestampSeconds <= 0) {
         return "no commits";
@@ -301,21 +367,34 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
     }
   }
 
-  private async inferParentBranches(branchNames: string[], baseBranchName: string) {
+  private async inferParentBranches(
+    branchNames: string[],
+    baseBranchName: string,
+  ) {
     const inferredParents = new Map<string, string | undefined>();
-    const candidateBranches = await this.getCandidateParentBranches(branchNames, baseBranchName);
+    const candidateBranches = await this.getCandidateParentBranches(
+      branchNames,
+      baseBranchName,
+    );
 
     await Promise.all(
       branchNames.map(async (branchName) => {
-        const inferredParent = await this.inferParentBranch(branchName, candidateBranches, baseBranchName);
+        const inferredParent = await this.inferParentBranch(
+          branchName,
+          candidateBranches,
+          baseBranchName,
+        );
         inferredParents.set(branchName, inferredParent);
-      })
+      }),
     );
 
     return inferredParents;
   }
 
-  private async getCandidateParentBranches(branchNames: string[], baseBranchName: string) {
+  private async getCandidateParentBranches(
+    branchNames: string[],
+    baseBranchName: string,
+  ) {
     const localBranches = await this.getLocalBranchNames();
     const mruBranches = this.getMruForCurrentRepo();
     const candidates = new Set<string>();
@@ -337,60 +416,86 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
   private async inferParentBranch(
     branchName: string,
     candidateBranches: string[],
-    baseBranchName: string
+    baseBranchName: string,
   ) {
     if (!candidateBranches.length) {
       return baseBranchName;
     }
 
-    const directAncestorCandidates = await this.findDirectAncestorCandidates(branchName, candidateBranches);
+    const directAncestorCandidates = await this.findDirectAncestorCandidates(
+      branchName,
+      candidateBranches,
+    );
     if (directAncestorCandidates.length > 0) {
-      const selected = directAncestorCandidates.sort((first, second) => second.commitTimestamp - first.commitTimestamp)[0];
+      const selected = directAncestorCandidates.sort(
+        (first, second) => second.commitTimestamp - first.commitTimestamp,
+      )[0];
       this.logStore.info(
         "branches",
-        `Inferred parent for '${branchName}' as '${selected.branchName}' (direct ancestor).`
+        `Inferred parent for '${branchName}' as '${selected.branchName}' (direct ancestor).`,
       );
       return selected.branchName;
     }
 
-    const mergeBaseCandidates = await this.findMergeBaseCandidates(branchName, candidateBranches);
+    const mergeBaseCandidates = await this.findMergeBaseCandidates(
+      branchName,
+      candidateBranches,
+    );
     if (mergeBaseCandidates.length > 0) {
-      const selected = mergeBaseCandidates.sort((first, second) => second.mergeBaseTimestamp - first.mergeBaseTimestamp)[0];
+      const selected = mergeBaseCandidates.sort(
+        (first, second) => second.mergeBaseTimestamp - first.mergeBaseTimestamp,
+      )[0];
       this.logStore.info(
         "branches",
-        `Inferred parent for '${branchName}' as '${selected.branchName}' (latest merge-base).`
+        `Inferred parent for '${branchName}' as '${selected.branchName}' (latest merge-base).`,
       );
       return selected.branchName;
     }
 
     this.logStore.warn(
       "branches",
-      `Could not infer parent for '${branchName}'. Falling back to '${baseBranchName}'.`
+      `Could not infer parent for '${branchName}'. Falling back to '${baseBranchName}'.`,
     );
     return baseBranchName;
   }
 
-  private async findDirectAncestorCandidates(branchName: string, candidateBranches: string[]) {
+  private async findDirectAncestorCandidates(
+    branchName: string,
+    candidateBranches: string[],
+  ) {
     const matches = await Promise.all(
       candidateBranches.map(async (candidateBranchName) => {
-        const isAncestor = await this.isAncestor(candidateBranchName, branchName);
+        const isAncestor = await this.isAncestor(
+          candidateBranchName,
+          branchName,
+        );
         if (!isAncestor) {
           return undefined;
         }
-        const commitTimestamp = await this.getBranchHeadTimestamp(candidateBranchName);
+        const commitTimestamp =
+          await this.getBranchHeadTimestamp(candidateBranchName);
         return {
           branchName: candidateBranchName,
-          commitTimestamp
+          commitTimestamp,
         };
-      })
+      }),
     );
-    return matches.filter((value): value is { branchName: string; commitTimestamp: number } => !!value);
+    return matches.filter(
+      (value): value is { branchName: string; commitTimestamp: number } =>
+        !!value,
+    );
   }
 
-  private async findMergeBaseCandidates(branchName: string, candidateBranches: string[]) {
+  private async findMergeBaseCandidates(
+    branchName: string,
+    candidateBranches: string[],
+  ) {
     const matches = await Promise.all(
       candidateBranches.map(async (candidateBranchName) => {
-        const mergeBase = await this.getMergeBase(branchName, candidateBranchName);
+        const mergeBase = await this.getMergeBase(
+          branchName,
+          candidateBranchName,
+        );
         if (!mergeBase) {
           return undefined;
         }
@@ -400,16 +505,23 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
         }
         return {
           branchName: candidateBranchName,
-          mergeBaseTimestamp
+          mergeBaseTimestamp,
         };
-      })
+      }),
     );
-    return matches.filter((value): value is { branchName: string; mergeBaseTimestamp: number } => !!value);
+    return matches.filter(
+      (value): value is { branchName: string; mergeBaseTimestamp: number } =>
+        !!value,
+    );
   }
 
   private async getLocalBranchNames() {
     try {
-      const stdout = await this.runGitCommand(["for-each-ref", "--format=%(refname:short)", "refs/heads"]);
+      const stdout = await this.runGitCommand([
+        "for-each-ref",
+        "--format=%(refname:short)",
+        "refs/heads",
+      ]);
       return stdout
         .split("\n")
         .map((line) => this.normalizeBranchName(line.trim()))
@@ -419,23 +531,37 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
     }
   }
 
-  private async isAncestor(ancestorBranchName: string, targetBranchName: string) {
+  private async isAncestor(
+    ancestorBranchName: string,
+    targetBranchName: string,
+  ) {
     if (!this.repository) {
       return false;
     }
     try {
-      await this.execFileAsync("git", ["merge-base", "--is-ancestor", ancestorBranchName, targetBranchName], {
-        cwd: this.repository.rootUri.fsPath
-      });
+      await this.execFileAsync(
+        "git",
+        ["merge-base", "--is-ancestor", ancestorBranchName, targetBranchName],
+        {
+          cwd: this.repository.rootUri.fsPath,
+        },
+      );
       return true;
     } catch {
       return false;
     }
   }
 
-  private async getMergeBase(firstBranchName: string, secondBranchName: string) {
+  private async getMergeBase(
+    firstBranchName: string,
+    secondBranchName: string,
+  ) {
     try {
-      const stdout = await this.runGitCommand(["merge-base", firstBranchName, secondBranchName]);
+      const stdout = await this.runGitCommand([
+        "merge-base",
+        firstBranchName,
+        secondBranchName,
+      ]);
       const mergeBase = stdout.trim();
       if (!mergeBase) {
         return undefined;
@@ -452,7 +578,12 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
 
   private async getCommitTimestamp(revision: string) {
     try {
-      const stdout = await this.runGitCommand(["log", "-1", "--format=%ct", revision]);
+      const stdout = await this.runGitCommand([
+        "log",
+        "-1",
+        "--format=%ct",
+        revision,
+      ]);
       const timestampSeconds = Number(stdout.trim());
       if (!Number.isFinite(timestampSeconds) || timestampSeconds <= 0) {
         return 0;
@@ -471,7 +602,7 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
     this.logStore.info("git", `$ ${commandString}`);
     try {
       const { stdout, stderr } = await this.execFileAsync("git", args, {
-        cwd: this.repository.rootUri.fsPath
+        cwd: this.repository.rootUri.fsPath,
       });
       const trimmedStdout = stdout.trim();
       const trimmedStderr = stderr.trim();
@@ -483,7 +614,8 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
       }
       return stdout;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown git command error";
+      const message =
+        error instanceof Error ? error.message : "Unknown git command error";
       this.logStore.error("git", message);
       throw error;
     }

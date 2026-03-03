@@ -49,7 +49,7 @@ function LogsPanel() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Card className="mb-2 w-full px-3 py-2.5 font-bold" padding="none">
+      <Card className="mb-2 w-full px-3 py-2 text-sm font-semibold" padding="none">
         <div className="flex items-center justify-between gap-2">
           <span>Logs</span>
           <Button size="sm" variant="secondary" onClick={postClearLogs}>
@@ -57,7 +57,7 @@ function LogsPanel() {
           </Button>
         </div>
       </Card>
-      <Card className="mb-2 flex items-center justify-between gap-2 px-3 py-2" padding="none">
+      <Card className="mb-2 flex items-center justify-between gap-2 px-3 py-1.5" padding="none">
         <label className="flex cursor-pointer items-center gap-2 text-xs">
           <input
             checked={isLogAutoScrollEnabled}
@@ -111,19 +111,19 @@ function LogsPanel() {
         ref={logsContainerRef}
       >
         {filteredLogs.length === 0 ? (
-          <div className="text-(--vscode-descriptionForeground)">No logs yet.</div>
+          <div className="text-muted-foreground">No logs yet.</div>
         ) : (
           filteredLogs.map((logEntry, index) => (
             <div className="mb-1.5 wrap-break-word" key={`${logEntry.timestampIso}-${index}`}>
-              <span className="text-(--vscode-descriptionForeground)">
+              <span className="text-muted-foreground">
                 [{formatLogTimestamp(logEntry.timestampIso)}]
               </span>
-              <span className="px-1 text-(--vscode-descriptionForeground)">[</span>
+              <span className="px-1 text-muted-foreground">[</span>
               <span style={{ color: getLogLevelColor(logEntry.level) }}>
                 {logEntry.level.toUpperCase()}
               </span>
-              <span className="px-1 text-(--vscode-descriptionForeground)">]</span>
-              <span className="text-(--vscode-descriptionForeground)">[{logEntry.category}]</span>
+              <span className="px-1 text-muted-foreground">]</span>
+              <span className="text-muted-foreground">[{logEntry.category}]</span>
               <span className="px-1">{logEntry.message}</span>
             </div>
           ))

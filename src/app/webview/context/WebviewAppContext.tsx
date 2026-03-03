@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ActiveTab,
   ExtensionToWebviewMessage,
@@ -81,6 +81,97 @@ function getWebviewAssets(): WebviewAssets {
   };
 }
 
+function getOptimisticBranchLists(
+  branchName: string,
+  currentPrimaryBranches: RecentBranch[],
+  currentOtherBranches: RecentBranch[]
+) {
+  const primaryBranchCount = currentPrimaryBranches.length;
+  const allBranches = [...currentPrimaryBranches, ...currentOtherBranches];
+  const selectedBranch = allBranches.find((branch) => branch.name === branchName);
+  const normalizedBranches = allBranches.map((branch) => {
+    return {
+      ...branch,
+      isCurrent: branch.name === branchName
+    };
+  });
+  if (!selectedBranch) {
+    return {
+      branches: normalizedBranches,
+      primaryBranches: normalizedBranches.slice(0, primaryBranchCount),
+      otherBranches: normalizedBranches.slice(primaryBranchCount)
+    };
+  }
+
+  const normalizedPrimaryBranches = normalizedBranches.filter((branch) =>
+    currentPrimaryBranches.some((primaryBranch) => primaryBranch.name === branch.name)
+  );
+  const normalizedOtherBranches = normalizedBranches.filter((branch) =>
+    currentOtherBranches.some((otherBranch) => otherBranch.name === branch.name)
+  );
+  const isSelectedBranchInPrimary = normalizedPrimaryBranches.some((branch) => branch.name === branchName);
+  if (isSelectedBranchInPrimary) {
+    return {
+      branches: normalizedBranches,
+      primaryBranches: normalizedPrimaryBranches,
+      otherBranches: normalizedOtherBranches
+    };
+  }
+
+  const normalizedSelectedBranch = normalizedBranches.find((branch) => branch.name === branchName);
+  if (!normalizedSelectedBranch) {
+    return {
+      branches: normalizedBranches,
+      primaryBranches: normalizedPrimaryBranches,
+      otherBranches: normalizedOtherBranches
+    };
+  }
+  const nextPrimaryBranches = [...normalizedPrimaryBranches, normalizedSelectedBranch];
+  const nextOtherBranches = normalizedOtherBranches.filter(
+    (branch) => branch.name !== normalizedSelectedBranch.name
+  );
+
+  return {
+    branches: [...nextPrimaryBranches, ...nextOtherBranches],
+    primaryBranches: nextPrimaryBranches,
+    otherBranches: nextOtherBranches
+  };
+}
+
+function applySessionBranchPromotions(
+  currentPrimaryBranches: RecentBranch[],
+  currentOtherBranches: RecentBranch[],
+  promotedBranchNames: string[]
+) {
+  if (promotedBranchNames.length === 0) {
+    return {
+      branches: [...currentPrimaryBranches, ...currentOtherBranches],
+      primaryBranches: currentPrimaryBranches,
+      otherBranches: currentOtherBranches
+    };
+  }
+
+  const nextPrimaryBranches = [...currentPrimaryBranches];
+  const nextOtherBranches = [...currentOtherBranches];
+  for (const promotedBranchName of promotedBranchNames) {
+    const otherBranchIndex = nextOtherBranches.findIndex((branch) => branch.name === promotedBranchName);
+    if (otherBranchIndex < 0) {
+      continue;
+    }
+    const [promotedBranch] = nextOtherBranches.splice(otherBranchIndex, 1);
+    if (nextPrimaryBranches.some((branch) => branch.name === promotedBranch.name)) {
+      continue;
+    }
+    nextPrimaryBranches.push(promotedBranch);
+  }
+
+  return {
+    branches: [...nextPrimaryBranches, ...nextOtherBranches],
+    primaryBranches: nextPrimaryBranches,
+    otherBranches: nextOtherBranches
+  };
+}
+
 function WebviewAppProvider({ children }: WebviewAppProviderProps) {
   const assets = useMemo(() => getWebviewAssets(), []);
   const vscode = useMemo(() => getVsCodeApi(window), []);
@@ -128,6 +219,7 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
   const [selectedBranchName, setSelectedBranchName] = useState<string | undefined>(
     () => restoredState.selectedBranchName
   );
+  const sessionPromotedBranchNamesRef = useRef<string[]>([]);
 
   useEffect(() => {
     const nextState: PersistedAppState = {
@@ -170,9 +262,14 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
         return;
       }
       if (message.type === "setBranches") {
-        setBranches(message.branches);
-        setPrimaryBranches(message.primaryBranches);
-        setOtherBranches(message.otherBranches);
+        const sessionAdjustedBranchLists = applySessionBranchPromotions(
+          message.primaryBranches,
+          message.otherBranches,
+          sessionPromotedBranchNamesRef.current
+        );
+        setBranches(sessionAdjustedBranchLists.branches);
+        setPrimaryBranches(sessionAdjustedBranchLists.primaryBranches);
+        setOtherBranches(sessionAdjustedBranchLists.otherBranches);
         setBaseBranchName(message.baseBranchName);
         setIsLoading(message.isLoading);
         return;
@@ -210,6 +307,24 @@ function WebviewAppProvider({ children }: WebviewAppProviderProps) {
   }, [vscode]);
 
   function postSwitchBranch(branchName: string) {
+    const isBranchInOtherBranches = otherBranches.some((branch) => branch.name === branchName);
+    if (isBranchInOtherBranches) {
+      const nextSessionPromotedBranchNames = sessionPromotedBranchNamesRef.current.filter(
+        (promotedBranchName) => promotedBranchName !== branchName
+      );
+      nextSessionPromotedBranchNames.push(branchName);
+      sessionPromotedBranchNamesRef.current = nextSessionPromotedBranchNames;
+    }
+    const optimisticBranchLists = getOptimisticBranchLists(
+      branchName,
+      primaryBranches,
+      otherBranches
+    );
+    setBranches(optimisticBranchLists.branches);
+    setPrimaryBranches(optimisticBranchLists.primaryBranches);
+    setOtherBranches(optimisticBranchLists.otherBranches);
+    setSelectedBranchName(branchName);
+    setIsLoading(true);
     vscode.postMessage({ type: "switchBranch", branchName });
   }
 

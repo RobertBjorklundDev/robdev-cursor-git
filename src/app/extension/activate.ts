@@ -110,6 +110,7 @@ async function activate(context: vscode.ExtensionContext) {
   }
 
   const repositorySubscriptions = new Map<string, vscode.Disposable>();
+  let isSwitchBranchInProgress = false;
 
   function getCurrentRepository() {
     const active = provider.getRepository();
@@ -120,7 +121,7 @@ async function activate(context: vscode.ExtensionContext) {
     return api.repositories[0];
   }
 
-  async function updateCurrentBranchMru(repository: Repository) {
+  async function updateCurrentBranchMru(repository: Repository, shouldRefresh = true) {
     const headName = repository.state.HEAD?.name;
     if (!headName) {
       return;
@@ -132,7 +133,9 @@ async function activate(context: vscode.ExtensionContext) {
     if (previous !== repository) {
       provider.setRepository(previous ?? repository);
     }
-    provider.refresh();
+    if (shouldRefresh) {
+      provider.refresh();
+    }
   }
 
   function subscribeToRepository(repository: Repository) {
@@ -142,6 +145,9 @@ async function activate(context: vscode.ExtensionContext) {
     }
 
     const disposable = repository.state.onDidChange(() => {
+      if (isSwitchBranchInProgress) {
+        return;
+      }
       void updateCurrentBranchMru(repository);
     });
     repositorySubscriptions.set(key, disposable);
@@ -199,6 +205,7 @@ async function activate(context: vscode.ExtensionContext) {
       }
 
       try {
+        isSwitchBranchInProgress = true;
         let targetBranch = normalizeBranchName(getBranchName(branchArg));
         if (!targetBranch) {
           const selectedBranch = await pickBranchForSwitch(provider);
@@ -220,12 +227,14 @@ async function activate(context: vscode.ExtensionContext) {
         }
 
         await repository.checkout(targetBranch);
-        await updateCurrentBranchMru(repository);
+        await updateCurrentBranchMru(repository, false);
         provider.refresh();
         logStore.info("commands", `Switched to '${targetBranch}'.`);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
         logStore.error("commands", `Failed to switch branch: ${message}`);
+      } finally {
+        isSwitchBranchInProgress = false;
       }
     }
   );
