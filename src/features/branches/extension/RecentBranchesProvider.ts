@@ -373,7 +373,6 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
   ) {
     const inferredParents = new Map<string, string | undefined>();
     const candidateBranches = await this.getCandidateParentBranches(
-      branchNames,
       baseBranchName,
     );
 
@@ -392,7 +391,6 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
   }
 
   private async getCandidateParentBranches(
-    branchNames: string[],
     baseBranchName: string,
   ) {
     const localBranches = await this.getLocalBranchNames();
@@ -407,9 +405,6 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
     for (const mruBranch of mruBranches) {
       candidates.add(mruBranch);
     }
-    for (const currentBranch of branchNames) {
-      candidates.delete(currentBranch);
-    }
     return Array.from(candidates);
   }
 
@@ -418,13 +413,17 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
     candidateBranches: string[],
     baseBranchName: string,
   ) {
-    if (!candidateBranches.length) {
+    const parentCandidates = candidateBranches.filter(
+      (candidateBranchName) => candidateBranchName !== branchName,
+    );
+
+    if (!parentCandidates.length) {
       return baseBranchName;
     }
 
     const directAncestorCandidates = await this.findDirectAncestorCandidates(
       branchName,
-      candidateBranches,
+      parentCandidates,
     );
     if (directAncestorCandidates.length > 0) {
       const selected = directAncestorCandidates.sort(
@@ -439,7 +438,7 @@ class RecentBranchesProvider implements vscode.TreeDataProvider<BranchItem> {
 
     const mergeBaseCandidates = await this.findMergeBaseCandidates(
       branchName,
-      candidateBranches,
+      parentCandidates,
     );
     if (mergeBaseCandidates.length > 0) {
       const selected = mergeBaseCandidates.sort(
