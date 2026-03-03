@@ -1,10 +1,11 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { randomUUID } = require("node:crypto");
 const { execFileSync } = require("node:child_process");
 
 const rootDir = path.resolve(__dirname, "..");
 const packageJsonPath = path.join(rootDir, "package.json");
-const outputDir = path.join(rootDir, "built-packages");
+const outputDir = path.join(rootDir, "dist", "packages");
 
 function readJsonFile(filePath) {
   const content = fs.readFileSync(filePath, "utf8");
@@ -25,6 +26,14 @@ function getNpmCommand() {
   }
 
   return "npm";
+}
+
+function buildVsixFileName(packageJson) {
+  if (typeof packageJson.publisher !== "string" || packageJson.publisher.length === 0) {
+    return `${packageJson.name}-${packageJson.version}.vsix`;
+  }
+
+  return `${packageJson.publisher}.${packageJson.name}-${packageJson.version}.vsix`;
 }
 
 function bumpPatchVersion(version) {
@@ -51,12 +60,14 @@ function run() {
 
   const packageJson = readJsonFile(packageJsonPath);
   const nextVersion = bumpPatchVersion(packageJson.version);
+  const nextBuildCode = randomUUID();
 
   packageJson.version = nextVersion;
+  packageJson.robdevBuildCode = nextBuildCode;
   writePackageJson(packageJson);
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const outputFile = `${packageJson.name}-${packageJson.version}.vsix`;
+  const outputFile = buildVsixFileName(packageJson);
   const outputPath = path.join(outputDir, outputFile);
 
   execFileSync(getVsceCommand(), ["vsce", "package", "--out", outputPath], {

@@ -1,0 +1,18 @@
+---
+description: Prefer APIs first, terminal for complex git flows
+alwaysApply: true
+---
+
+# API-first, terminal-fallback (RDgit)
+
+For this repository:
+
+- Prefer built-in APIs over shell/terminal when the action is reliably supported.
+- Use VS Code/Cursor APIs for local repo actions when possible (for example `repository.checkout`).
+- Use GitHub APIs (REST/GraphQL) for pull request actions where possible.
+- Use terminal dispatch for git operations likely to need interactive resolution:
+  - merge conflicts
+  - auth prompts
+  - hooks or multi-step command continuation
+- Keep terminal-backed UI minimal: dispatch command, show status/logs, let terminal handle edge cases.
+- Avoid building custom UI state machines for every possible git failure mode.
