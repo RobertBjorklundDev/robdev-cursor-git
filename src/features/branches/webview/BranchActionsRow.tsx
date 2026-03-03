@@ -12,6 +12,7 @@ import { IconActionButton } from "../../../shared/webview/components";
 interface BranchActionsRowProps {
   branch: RecentBranch;
   inferredParentBranchName: string;
+  shouldShowMergeAndCreatePullRequestActions: boolean;
   hasOpenPullRequest: boolean;
   isGitOperationInProgress: boolean;
   onPullFromOrigin(branchName: string): void;
@@ -27,6 +28,7 @@ interface BranchActionsRowProps {
 function BranchActionsRow({
   branch,
   inferredParentBranchName,
+  shouldShowMergeAndCreatePullRequestActions,
   hasOpenPullRequest,
   isGitOperationInProgress,
   onPullFromOrigin,
@@ -55,17 +57,19 @@ function BranchActionsRow({
       >
         <ArrowUp aria-hidden="true" size={18} />
       </IconActionButton>
-      <IconActionButton
-        disabled={
-          isGitOperationInProgress || branch.name === inferredParentBranchName
-        }
-        label={`Merge ${inferredParentBranchName} into ${branch.name}`}
-        onClick={() => {
-          onMergeFromBase(branch.name, inferredParentBranchName);
-        }}
-      >
-        <GitMerge aria-hidden="true" size={18} />
-      </IconActionButton>
+      {shouldShowMergeAndCreatePullRequestActions ? (
+        <IconActionButton
+          disabled={
+            isGitOperationInProgress || branch.name === inferredParentBranchName
+          }
+          label={`Merge ${inferredParentBranchName} into ${branch.name}`}
+          onClick={() => {
+            onMergeFromBase(branch.name, inferredParentBranchName);
+          }}
+        >
+          <GitMerge aria-hidden="true" size={18} />
+        </IconActionButton>
+      ) : null}
       <IconActionButton
         disabled={isGitOperationInProgress}
         label={`Split ${branch.name}`}
@@ -75,24 +79,26 @@ function BranchActionsRow({
       >
         <GitFork aria-hidden="true" size={18} />
       </IconActionButton>
-      {!hasOpenPullRequest ? (
-        <IconActionButton
-          disabled={isGitOperationInProgress}
-          label={`Create draft PR from ${branch.name} to ${inferredParentBranchName}`}
-          onClick={() => {
-            onCreateDraftPullRequest(branch.name, inferredParentBranchName);
-          }}
-        >
-          <GitPullRequest aria-hidden="true" size={18} />
-        </IconActionButton>
-      ) : (
-        <IconActionButton
-          disabled
-          label="Cannot create draft PR: open PR already exists"
-        >
-          <GitPullRequest aria-hidden="true" size={18} />
-        </IconActionButton>
-      )}
+      {shouldShowMergeAndCreatePullRequestActions ? (
+        !hasOpenPullRequest ? (
+          <IconActionButton
+            disabled={isGitOperationInProgress}
+            label={`Create draft PR from ${branch.name} to ${inferredParentBranchName}`}
+            onClick={() => {
+              onCreateDraftPullRequest(branch.name, inferredParentBranchName);
+            }}
+          >
+            <GitPullRequest aria-hidden="true" size={18} />
+          </IconActionButton>
+        ) : (
+          <IconActionButton
+            disabled
+            label="Cannot create draft PR: open PR already exists"
+          >
+            <GitPullRequest aria-hidden="true" size={18} />
+          </IconActionButton>
+        )
+      ) : null}
     </div>
   );
 }

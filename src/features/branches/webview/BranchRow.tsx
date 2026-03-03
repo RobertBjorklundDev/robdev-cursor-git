@@ -6,6 +6,7 @@ import { BranchActionsRow } from "./BranchActionsRow";
 interface BranchRowProps {
   branch: RecentBranch;
   inferredParentBranchName: string;
+  shouldShowMergeAndCreatePullRequestActions: boolean;
   hasOpenPullRequest: boolean;
   isGitOperationInProgress: boolean;
   onSwitchBranch(branchName: string): void;
@@ -22,6 +23,7 @@ interface BranchRowProps {
 function BranchRow({
   branch,
   inferredParentBranchName,
+  shouldShowMergeAndCreatePullRequestActions,
   hasOpenPullRequest,
   isGitOperationInProgress,
   onSwitchBranch,
@@ -56,6 +58,7 @@ function BranchRow({
               branch={branch}
               hasOpenPullRequest={hasOpenPullRequest}
               inferredParentBranchName={inferredParentBranchName}
+              shouldShowMergeAndCreatePullRequestActions={shouldShowMergeAndCreatePullRequestActions}
               isGitOperationInProgress={isGitOperationInProgress}
               onCreateDraftPullRequest={onCreateDraftPullRequest}
               onMergeFromBase={onMergeFromBase}

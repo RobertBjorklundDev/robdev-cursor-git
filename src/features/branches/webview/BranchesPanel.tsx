@@ -35,12 +35,15 @@ function BranchesPanel() {
     );
     const inferredParentBranchName =
       branch.inferredParentBranchName ?? baseBranchName;
+    const shouldShowMergeAndCreatePullRequestActions =
+      branch.name !== baseBranchName;
     return (
       <BranchRow
         key={branch.name}
         branch={branch}
         hasOpenPullRequest={hasOpenPullRequest}
         inferredParentBranchName={inferredParentBranchName}
+        shouldShowMergeAndCreatePullRequestActions={shouldShowMergeAndCreatePullRequestActions}
         isGitOperationInProgress={gitOperationState.isInProgress}
         onCreateDraftPullRequest={postCreateDraftPullRequest}
         onMergeFromBase={postMergeFromBase}
