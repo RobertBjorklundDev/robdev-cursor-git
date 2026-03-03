@@ -7,7 +7,7 @@
   "license": "MIT",
   "displayName": "RobDev Git",
   "description": "Show top 5 recently used local branches and switch with one click.",
-  "version": "0.0.66",
+  "version": "0.0.68",
   "publisher": "local",
   "engines": {
     "vscode": "^1.85.0"
@@ -157,5 +157,5 @@
     "react-dom": "^19.2.4",
     "tailwind-merge": "^3.5.0"
   },
-  "robdevBuildCode": "4c861263-bdea-4cb1-82de-1eeed06d0cf8"
+  "robdevBuildCode": "1d513f96-27e9-4004-8150-fdab4722e010"
 }

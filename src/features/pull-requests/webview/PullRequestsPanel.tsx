@@ -8,6 +8,7 @@ import { PullRequestRow } from "./PullRequestRow";
 function PullRequestsPanel() {
   const {
     authStatus,
+    branches,
     isLoading,
     pullRequests,
     pullRequestFilter,
@@ -16,6 +17,7 @@ function PullRequestsPanel() {
     postMarkPullRequestDraft,
     postOpenGithubAccounts,
     postOpenPullRequest,
+    postSwitchBranch,
     postSignInGithub,
     setPullRequestFilter
   } = useWebviewAppContext();
@@ -73,11 +75,15 @@ function PullRequestsPanel() {
             {visiblePullRequests.map((pullRequest) => (
               <PullRequestRow
                 key={pullRequest.id}
+                isCurrentBranch={branches.some(
+                  (branch) => branch.isCurrent && branch.name === pullRequest.branchName
+                )}
                 pullRequest={pullRequest}
                 onMarkPullRequestDraft={postMarkPullRequestDraft}
                 onMarkPullRequestReady={postMarkPullRequestReady}
                 onMergePullRequest={postMergePullRequest}
                 onOpenPullRequest={postOpenPullRequest}
+                onSwitchBranch={postSwitchBranch}
               />
             ))}
           </PullRequestListState>
