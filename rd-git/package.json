@@ -1,0 +1,138 @@
+{
+  "name": "rd-git",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "license": "MIT",
+  "displayName": "RobDev Git",
+  "description": "Branch-focused Git tooling for recent local and origin branches.",
+  "version": "0.0.68",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension/app/extension/activate.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "rd-git",
+          "title": "RobDev Git",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "rd-git": [
+        {
+          "id": "rd-git.view",
+          "name": "RDgit",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "RDgit",
+      "properties": {
+        "rd-git.gitCommands.switchBranch": {
+          "type": "string",
+          "default": "git checkout {{targetBranch}}",
+          "markdownDescription": "Terminal command template used by **Switch Branch**. Supports placeholder: `{{targetBranch}}`."
+        },
+        "rd-git.gitCommands.pullFromOrigin": {
+          "type": "string",
+          "default": "git pull",
+          "markdownDescription": "Terminal command template used by **Pull From Origin**. Supports placeholder: `{{targetBranch}}`."
+        },
+        "rd-git.gitCommands.pushToOrigin": {
+          "type": "string",
+          "default": "git push -u origin {{targetBranch}}",
+          "markdownDescription": "Terminal command template used by **Push To Origin**. Supports placeholder: `{{targetBranch}}`."
+        },
+        "rd-git.gitCommands.mergeFromBase": {
+          "type": "string",
+          "default": "git merge {{baseBranch}}",
+          "markdownDescription": "Terminal command template used by **Merge From Base**. Supports placeholders: `{{baseBranch}}`, `{{targetBranch}}`."
+        },
+        "rd-git.gitCommands.splitBranch": {
+          "type": "string",
+          "default": "git checkout -b {{newBranch}} {{targetBranch}}",
+          "markdownDescription": "Terminal command template used by **Split Branch**. Supports placeholders: `{{targetBranch}}`, `{{newBranch}}`."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "rd-git.switchBranch",
+        "title": "Switch Branch"
+      },
+      {
+        "command": "rd-git.pullFromOrigin",
+        "title": "Pull Branch From Origin"
+      },
+      {
+        "command": "rd-git.mergeFromBase",
+        "title": "Merge Base Into Branch"
+      },
+      {
+        "command": "rd-git.pushToOrigin",
+        "title": "Push Branch To Origin"
+      },
+      {
+        "command": "rd-git.splitBranch",
+        "title": "Split Branch"
+      }
+    ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "rd-git.mergeFromBase",
+          "when": "view == rd-git.view && viewItem == rd-git.branchItem",
+          "group": "inline"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "npm run typecheck:webview && npm run build:webview && tsc -p .",
+    "build:webview": "npm run build:webview:js && npm run build:webview:css",
+    "build:webview:js": "esbuild src/app/webview/main.tsx --bundle --platform=browser --format=iife --target=es2020 --outfile=dist/media/webview.js",
+    "build:webview:css": "tailwindcss -i src/app/webview/styles.css -o dist/media/webview.css --minify",
+    "typecheck:webview": "tsc -p tsconfig.webview.json --noEmit",
+    "watch": "tsc -w -p .",
+    "package": "node scripts/package.js",
+    "dev:local": "node scripts/local-dev.js"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.2.1",
+    "@types/node": "^25.3.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.27.3",
+    "tailwindcss": "^4.2.1",
+    "typescript": "^5.6.3",
+    "vsce": "^2.15.0"
+  },
+  "dependencies": {
+    "@radix-ui/react-accordion": "^1.2.12",
+    "@radix-ui/react-hover-card": "^1.1.15",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@radix-ui/react-tabs": "^1.1.13",
+    "@radix-ui/react-tooltip": "^1.2.8",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.575.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "tailwind-merge": "^3.5.0"
+  },
+  "robdevBuildCode": "1d513f96-27e9-4004-8150-fdab4722e010"
+}

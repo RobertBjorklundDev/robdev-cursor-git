@@ -1,0 +1,114 @@
+{
+  "name": "rd-github",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "license": "MIT",
+  "displayName": "RobDev GitHub",
+  "description": "GitHub pull-request focused companion for Cursor/VS Code.",
+  "version": "0.0.68",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension/app/extension/activate.js",
+  "extensionDependencies": [
+    "vscode.github-authentication"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "rd-github",
+          "title": "RobDev GitHub",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "rd-github": [
+        {
+          "id": "rd-github.view",
+          "name": "RDgithub",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "RDgithub",
+      "properties": {}
+    },
+    "commands": [
+      {
+        "command": "rd-github.switchBranch",
+        "title": "Switch Branch"
+      },
+      {
+        "command": "rd-github.createDraftPullRequest",
+        "title": "Create Draft Pull Request"
+      },
+      {
+        "command": "rd-github.markPullRequestDraft",
+        "title": "Mark Pull Request As Draft"
+      },
+      {
+        "command": "rd-github.markPullRequestReady",
+        "title": "Mark Pull Request Ready For Review"
+      },
+      {
+        "command": "rd-github.signInGithub",
+        "title": "Sign In to GitHub"
+      },
+      {
+        "command": "rd-github.switchGithubAccount",
+        "title": "Switch GitHub Account"
+      },
+      {
+        "command": "rd-github.openGithubAccounts",
+        "title": "Open GitHub Accounts"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "npm run typecheck:webview && npm run build:webview && tsc -p .",
+    "build:webview": "npm run build:webview:js && npm run build:webview:css",
+    "build:webview:js": "esbuild src/app/webview/main.tsx --bundle --platform=browser --format=iife --target=es2020 --outfile=dist/media/webview.js",
+    "build:webview:css": "tailwindcss -i src/app/webview/styles.css -o dist/media/webview.css --minify",
+    "typecheck:webview": "tsc -p tsconfig.webview.json --noEmit",
+    "watch": "tsc -w -p .",
+    "package": "node scripts/package.js",
+    "dev:local": "node scripts/local-dev.js"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.2.1",
+    "@types/node": "^25.3.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.27.3",
+    "tailwindcss": "^4.2.1",
+    "typescript": "^5.6.3",
+    "vsce": "^2.15.0"
+  },
+  "dependencies": {
+    "@radix-ui/react-accordion": "^1.2.12",
+    "@radix-ui/react-hover-card": "^1.1.15",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@radix-ui/react-tabs": "^1.1.13",
+    "@radix-ui/react-tooltip": "^1.2.8",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.575.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "tailwind-merge": "^3.5.0"
+  },
+  "robdevBuildCode": "1d513f96-27e9-4004-8150-fdab4722e010"
+}
