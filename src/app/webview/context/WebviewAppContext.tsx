@@ -77,7 +77,8 @@ function getWebviewAssets(): WebviewAssets {
   const windowWithData = window as Window & { __RD_GIT_ASSETS__?: WebviewAssets };
   return {
     extensionVersion: windowWithData.__RD_GIT_ASSETS__?.extensionVersion ?? "unknown",
-    extensionBuildCode: windowWithData.__RD_GIT_ASSETS__?.extensionBuildCode ?? "dev"
+    extensionBuildCode: windowWithData.__RD_GIT_ASSETS__?.extensionBuildCode ?? "dev",
+    viewMode: windowWithData.__RD_GIT_ASSETS__?.viewMode ?? "git"
   };
 }
 

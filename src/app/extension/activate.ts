@@ -6,6 +6,7 @@ import { RecentBranchesProvider } from "../../features/branches/extension";
 import { RecentBranchesWebviewProvider } from "../../features/webview/extension";
 import { PullRequestsProvider } from "../../features/pull-requests/extension";
 import type { GitAPI, GitExtensionExports, Repository } from "../../shared/extension";
+import type { LogEntry } from "../../shared/webview/contracts";
 import { GitTerminalExecutor, type TerminalDispatchResult } from "./GitTerminalExecutor";
 
 interface ExtensionPackageJson {
@@ -50,45 +51,94 @@ async function activate(context: vscode.ExtensionContext) {
   const extensionVersion = typeof extensionPackageJson.version === "string" ? extensionPackageJson.version : "unknown";
   const extensionBuildCode =
     typeof extensionPackageJson.robdevBuildCode === "string" ? extensionPackageJson.robdevBuildCode : "dev";
-  const webviewProvider = new RecentBranchesWebviewProvider(
+  const gitWebviewProvider = new RecentBranchesWebviewProvider(
     provider,
     pullRequestsProvider,
     logStore,
     context.extensionUri,
     context.workspaceState,
+    "git",
     extensionVersion,
     extensionBuildCode
   );
-  const webviewDisposable = vscode.window.registerWebviewViewProvider("rd-git.view", webviewProvider, {
+  const githubWebviewProvider = new RecentBranchesWebviewProvider(
+    provider,
+    pullRequestsProvider,
+    logStore,
+    context.extensionUri,
+    context.workspaceState,
+    "github",
+    extensionVersion,
+    extensionBuildCode
+  );
+  const gitWebviewDisposable = vscode.window.registerWebviewViewProvider("rd-git.view", gitWebviewProvider, {
     webviewOptions: {
       retainContextWhenHidden: true
     }
   });
-  context.subscriptions.push(webviewDisposable);
-  context.subscriptions.push(webviewProvider);
+  const githubWebviewDisposable = vscode.window.registerWebviewViewProvider("rd-git.githubView", githubWebviewProvider, {
+    webviewOptions: {
+      retainContextWhenHidden: true
+    }
+  });
+  const webviewProviders = [gitWebviewProvider, githubWebviewProvider];
+  context.subscriptions.push(gitWebviewDisposable);
+  context.subscriptions.push(githubWebviewDisposable);
+  context.subscriptions.push(gitWebviewProvider);
+  context.subscriptions.push(githubWebviewProvider);
   const gitTerminalExecutor = new GitTerminalExecutor();
   context.subscriptions.push(gitTerminalExecutor);
+  const logsOutputChannel = vscode.window.createOutputChannel("RD Git");
+  context.subscriptions.push(logsOutputChannel);
+  let isLogsOutputMirroringEnabled = false;
 
   function setGitOperationInProgress(
     action: "pullFromOrigin" | "pushToOrigin" | "mergeFromBase" | "splitBranch",
     notice: string
   ) {
-    webviewProvider.setGitOperationState({
+    const nextState = {
       isInProgress: true,
       action,
       terminalName: gitTerminalExecutor.getTerminalName(),
       notice
-    });
+    };
+    for (const webviewProvider of webviewProviders) {
+      webviewProvider.setGitOperationState(nextState);
+    }
   }
 
   function setGitOperationIdle(notice: string) {
-    webviewProvider.setGitOperationState({
+    const nextState = {
       isInProgress: false,
       action: undefined,
       terminalName: gitTerminalExecutor.getTerminalName(),
       notice
-    });
+    };
+    for (const webviewProvider of webviewProviders) {
+      webviewProvider.setGitOperationState(nextState);
+    }
   }
+
+  function formatLogEntry(logEntry: LogEntry) {
+    const timestamp = new Date(logEntry.timestampIso).toLocaleTimeString();
+    return `[${timestamp}] [${logEntry.level.toUpperCase()}] [${logEntry.category}] ${logEntry.message}`;
+  }
+
+  function repopulateLogsOutput() {
+    logsOutputChannel.clear();
+    const entries = logStore.getEntries();
+    for (const entry of entries) {
+      logsOutputChannel.appendLine(formatLogEntry(entry));
+    }
+  }
+
+  const logMirrorDisposable = logStore.onDidAppend((entry) => {
+    if (!isLogsOutputMirroringEnabled) {
+      return;
+    }
+    logsOutputChannel.appendLine(formatLogEntry(entry));
+  });
+  context.subscriptions.push(logMirrorDisposable);
 
   function logTerminalDispatchResult(actionLabel: string, command: string, result: TerminalDispatchResult) {
     if (result.ok) {
@@ -676,6 +726,16 @@ async function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  const openSettingsDisposable = vscode.commands.registerCommand("rd-git.openSettings", async () => {
+    await vscode.commands.executeCommand("workbench.action.openSettings", `@ext:${context.extension.id}`);
+  });
+
+  const openLogsDisposable = vscode.commands.registerCommand("rd-git.openLogs", async () => {
+    isLogsOutputMirroringEnabled = true;
+    repopulateLogsOutput();
+    logsOutputChannel.show(true);
+  });
+
   context.subscriptions.push(openRepoDisposable);
   context.subscriptions.push(closeRepoDisposable);
   context.subscriptions.push(activeEditorDisposable);
@@ -692,6 +752,8 @@ async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(signInGithubDisposable);
   context.subscriptions.push(switchGithubAccountDisposable);
   context.subscriptions.push(openGithubAccountsDisposable);
+  context.subscriptions.push(openSettingsDisposable);
+  context.subscriptions.push(openLogsDisposable);
 }
 
 function deactivate() {}

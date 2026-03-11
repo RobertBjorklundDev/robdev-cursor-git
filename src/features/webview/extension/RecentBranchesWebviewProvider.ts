@@ -18,9 +18,10 @@ import type {
   WebviewSetLoadingMessage,
   WebviewSetLogsMessage,
   WebviewSetPullRequestsMessage,
+  WebviewViewMode,
 } from "../../../shared/webview/contracts";
 
-const PERSISTED_WEBVIEW_STATE_KEY = "rd-git.webviewState";
+const PERSISTED_WEBVIEW_STATE_KEY_PREFIX = "rd-git.webviewState";
 const VISIBLE_REFRESH_INTERVAL_MS = 60_000;
 const VISIBILITY_REFRESH_COOLDOWN_MS = 10_000;
 
@@ -31,6 +32,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
   private readonly logStore: LogStore;
   private readonly extensionUri: vscode.Uri;
   private readonly workspaceState: vscode.Memento;
+  private readonly viewMode: WebviewViewMode;
   private readonly extensionVersion: string;
   private readonly extensionBuildCode: string;
   private readonly subscriptions: vscode.Disposable[] = [];
@@ -61,6 +63,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     logStore: LogStore,
     extensionUri: vscode.Uri,
     workspaceState: vscode.Memento,
+    viewMode: WebviewViewMode,
     extensionVersion: string,
     extensionBuildCode: string,
   ) {
@@ -69,6 +72,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     this.logStore = logStore;
     this.extensionUri = extensionUri;
     this.workspaceState = workspaceState;
+    this.viewMode = viewMode;
     this.extensionVersion = extensionVersion;
     this.extensionBuildCode = extensionBuildCode;
     this.restorePersistedState();
@@ -501,6 +505,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
     const assets: WebviewAssets = {
       extensionVersion: this.extensionVersion,
       extensionBuildCode: this.extensionBuildCode,
+      viewMode: this.viewMode
     };
     const csp = [
       "default-src 'none'",
@@ -529,7 +534,7 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
 
   private restorePersistedState() {
     const persistedState = this.workspaceState.get<unknown>(
-      PERSISTED_WEBVIEW_STATE_KEY,
+      this.getPersistedWebviewStateKey(),
     );
     if (!isPersistedWebviewState(persistedState)) {
       return;
@@ -551,7 +556,11 @@ class RecentBranchesWebviewProvider implements vscode.WebviewViewProvider {
       authStatus: this.lastAuthStatus,
       baseBranchName: this.lastBaseBranchName,
     };
-    await this.workspaceState.update(PERSISTED_WEBVIEW_STATE_KEY, state);
+    await this.workspaceState.update(this.getPersistedWebviewStateKey(), state);
+  }
+
+  private getPersistedWebviewStateKey() {
+    return `${PERSISTED_WEBVIEW_STATE_KEY_PREFIX}.${this.viewMode}`;
   }
 
   private getNextRenderRequestSequence() {

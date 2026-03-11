@@ -1,1 +1,0 @@
-export { RecentBranchesWebviewProvider } from "./RecentBranchesWebviewProvider";

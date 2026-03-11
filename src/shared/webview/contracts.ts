@@ -34,6 +34,7 @@ interface GitOperationState {
 }
 
 type LogLevel = "info" | "warn" | "error";
+type WebviewViewMode = "git" | "github";
 
 interface LogEntry {
   timestampIso: string;
@@ -126,6 +127,7 @@ type ExtensionToWebviewMessage =
 interface WebviewAssets {
   extensionVersion: string;
   extensionBuildCode: string;
+  viewMode: WebviewViewMode;
 }
 
 interface PersistedAppState {
@@ -162,6 +164,7 @@ export type {
   GitHubAuthStatus,
   LogEntry,
   LogLevel,
+  WebviewViewMode,
   PersistedAppState,
   PersistedWebviewState,
   PullRequestFilter,

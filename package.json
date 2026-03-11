@@ -7,7 +7,7 @@
   "license": "MIT",
   "displayName": "RobDev Git",
   "description": "Show top 5 recently used local branches and switch with one click.",
-  "version": "0.0.68",
+  "version": "0.0.69",
   "publisher": "local",
   "engines": {
     "vscode": "^1.85.0"
@@ -29,6 +29,11 @@
           "id": "rd-git",
           "title": "RobDev Git",
           "icon": "resources/icon.svg"
+        },
+        {
+          "id": "rd-git-github",
+          "title": "RobDev GitHub",
+          "icon": "resources/rd-mark.svg"
         }
       ]
     },
@@ -37,6 +42,13 @@
         {
           "id": "rd-git.view",
           "name": "RDgit",
+          "type": "webview"
+        }
+      ],
+      "rd-git-github": [
+        {
+          "id": "rd-git.githubView",
+          "name": "RDgithub",
           "type": "webview"
         }
       ]
@@ -74,43 +86,59 @@
     "commands": [
       {
         "command": "rd-git.switchBranch",
-        "title": "Switch Branch"
+        "title": "RD Git: Switch Branch"
+      },
+      {
+        "command": "rd-git.pullFromOrigin",
+        "title": "RD Git: Pull Branch From Origin"
       },
       {
         "command": "rd-git.mergeFromBase",
-        "title": "Merge Base Into Branch"
+        "title": "RD Git: Merge Base Into Branch"
       },
       {
         "command": "rd-git.pushToOrigin",
-        "title": "Push Branch To Origin"
+        "title": "RD Git: Push Branch To Origin"
       },
       {
         "command": "rd-git.splitBranch",
-        "title": "Split Branch"
+        "title": "RD Git: Split Branch"
       },
       {
         "command": "rd-git.createDraftPullRequest",
-        "title": "Create Draft Pull Request"
+        "title": "RD Git: Create Draft Pull Request"
+      },
+      {
+        "command": "rd-git.mergePullRequest",
+        "title": "RD Git: Merge Pull Request"
       },
       {
         "command": "rd-git.markPullRequestDraft",
-        "title": "Mark Pull Request As Draft"
+        "title": "RD Git: Mark Pull Request As Draft"
       },
       {
         "command": "rd-git.markPullRequestReady",
-        "title": "Mark Pull Request Ready For Review"
+        "title": "RD Git: Mark Pull Request Ready For Review"
       },
       {
         "command": "rd-git.signInGithub",
-        "title": "Sign In to GitHub"
+        "title": "RD Git: Sign In To GitHub"
       },
       {
         "command": "rd-git.switchGithubAccount",
-        "title": "Switch GitHub Account"
+        "title": "RD Git: Switch GitHub Account"
       },
       {
         "command": "rd-git.openGithubAccounts",
-        "title": "Open GitHub Accounts"
+        "title": "RD Git: Open GitHub Accounts"
+      },
+      {
+        "command": "rd-git.openSettings",
+        "title": "RD Git: Open Settings"
+      },
+      {
+        "command": "rd-git.openLogs",
+        "title": "RD Git: Open Logs"
       }
     ],
     "menus": {
@@ -119,6 +147,18 @@
           "command": "rd-git.mergeFromBase",
           "when": "view == rd-git.view && viewItem == rd-git.branchItem",
           "group": "inline"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "rd-git.openLogs",
+          "when": "view == rd-git.view || view == rd-git.githubView",
+          "group": "navigation@98"
+        },
+        {
+          "command": "rd-git.openSettings",
+          "when": "view == rd-git.view || view == rd-git.githubView",
+          "group": "navigation@99"
         }
       ]
     }
@@ -157,5 +197,5 @@
     "react-dom": "^19.2.4",
     "tailwind-merge": "^3.5.0"
   },
-  "robdevBuildCode": "1d513f96-27e9-4004-8150-fdab4722e010"
+  "robdevBuildCode": "ac006a19-8940-468f-898c-cf2e29bacbcf"
 }
