@@ -1,0 +1,9 @@
+dist/packages/**
+built-packages/**
+node_modules/**
+src/**
+scripts/**
+tsconfig*.json
+*.tsbuildinfo
+.vscode/**
+.cursor/**

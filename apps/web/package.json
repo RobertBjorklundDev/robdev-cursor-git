@@ -1,0 +1,28 @@
+{
+  "name": "@rd-git/web",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p . --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p . --noEmit"
+  },
+  "dependencies": {
+    "@rd-git/shared": "workspace:*",
+    "@rd-git/ui": "workspace:*",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "lucide-react": "^0.575.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.5.2",
+    "tailwindcss": "^4.2.1",
+    "@tailwindcss/vite": "^4.2.1",
+    "typescript": "^5.6.3",
+    "vite": "^6.3.5"
+  }
+}

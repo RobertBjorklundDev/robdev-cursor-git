@@ -1,0 +1,35 @@
+export type {
+  GitHubAuthStatus,
+  GitHubRepository,
+  IssueDetail,
+  PullRequestDetail,
+  PullRequestSummary,
+  PullRequestWithContext,
+  ReviewSummary,
+  ReviewThread,
+  TimelineComment,
+} from "./types";
+
+export {
+  GitHubClient,
+  GitHubApiError,
+  GITHUB_API_URL,
+  createDraftPullRequest,
+  getPullRequestComments,
+  getPullRequestDetail,
+  getPullRequestMergeability,
+  getPullRequestReviewComments,
+  getPullRequestReviews,
+  getViewerLogin,
+  listOpenPullRequests,
+  markPullRequestDraft,
+  markPullRequestReady,
+  mergePullRequest,
+  getFilteredIssueTimeline,
+  getIssueComments,
+  getIssueDetail,
+  DEFAULT_LINKING_CONFIG,
+  parseGitHubRemoteUrl,
+  resolveLinkedIssues,
+} from "./github";
+export type { LinkingConfig, LinkingStrategy, LinkedIssueRef } from "./github";
